@@ -992,6 +992,7 @@ function fixColor() {
   if (free && free !== myColor) { myColor = free; net.me.set("c", myColor); }
 }
 function frame(now) {
+  requestAnimationFrame(frame);
   const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now;
   if (now - lastHb > 1000) { lastHb = now; net.me.set("hb", Date.now()); fixColor(); }
   readKeys();
@@ -1006,7 +1007,6 @@ function frame(now) {
     if (b.phase !== "pick" && !bv.cur && !bv.queue.length) battleOver(b);
   } else { drawField(now, dt); if (catching) drawCatch(now); }
   if (now - lastHud > 100) { lastHud = now; hud(now); }
-  requestAnimationFrame(frame);
 }
 
 (async function start() {
