@@ -1,0 +1,1037 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Monster Tamer</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: #2f6b3a; }
+  body { font: 15px/1.3 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #fff; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; }
+  #hint { position: fixed; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); max-width: calc(100vw - 32px); box-sizing: border-box; padding: 8px 16px;
+          border-radius: 999px; background: #0009; font-weight: 700; font-size: 14px; text-align: center; pointer-events: none; transition: opacity .5s; }
+  #toast { position: fixed; top: 22%; left: 50%; transform: translateX(-50%); max-width: calc(100vw - 32px); box-sizing: border-box; padding: 9px 18px; border-radius: 14px; background: #000b;
+           font-weight: 800; text-align: center; pointer-events: none; transition: opacity .3s; opacity: 0; }
+  #fight { position: fixed; right: max(12px, env(safe-area-inset-right)); bottom: calc(max(10px, env(safe-area-inset-bottom)) + 92px); min-width: 140px; min-height: 52px; padding: 0 18px;
+           border: 0; border-radius: 16px; background: #ffd166; color: #3a2600; font: 900 16px system-ui, sans-serif; box-shadow: 0 4px 0 #b8861b, 0 6px 16px #0006; cursor: pointer; }
+  #fight:disabled { background: #ffffff33; color: #ffffffaa; box-shadow: none; }
+  #fight[hidden], #bpanel[hidden], #over[hidden] { display: none; }
+  #net { position: fixed; bottom: max(4px, env(safe-area-inset-bottom)); left: 10px; font-size: 11px; opacity: .8; pointer-events: none; white-space: nowrap; text-shadow: 0 1px 2px #000; }
+  #bpanel { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px max(12px, env(safe-area-inset-right)) calc(max(10px, env(safe-area-inset-bottom)) + 14px) max(12px, env(safe-area-inset-left));
+            background: linear-gradient(#1c2238f2, #11152af8); border-top: 3px solid #ffffff22; }
+  #log { min-height: 42px; max-width: 760px; margin: 0 auto 8px; font: 800 17px/1.25 system-ui, sans-serif; text-shadow: 0 1px 2px #000; }
+  #moves { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; max-width: 760px; margin: 0 auto; }
+  @media (max-width: 560px) { #moves { grid-template-columns: 1fr 1fr; } }
+  #moves button { min-height: 52px; border: 0; border-radius: 12px; background: var(--t, #59607a); color: #fff; font: 800 15px system-ui, sans-serif; cursor: pointer; text-shadow: 0 1px 2px #0008;
+                  box-shadow: inset 0 -4px 0 #0004; text-align: left; padding: 6px 12px; }
+  #moves button small { display: block; font-size: 11px; font-weight: 700; opacity: .9; }
+  #moves button.wait { grid-column: 1 / -1; background: #ffffff18; text-align: center; box-shadow: none; }
+  #over { position: fixed; inset: 0; display: grid; place-items: center; background: #0008; z-index: 5; }
+  .box { box-sizing: border-box; width: min(380px, calc(100vw - 32px)); max-height: 86vh; overflow: auto; padding: 20px; border-radius: 18px; background: #1c2238; border: 1px solid #ffffff22; text-align: center; }
+  .box h2 { margin: 0 0 4px; font-size: 26px; } .box p { margin: 0 0 12px; opacity: .9; }
+  .box h3 { margin: 6px 0 4px; font-size: 13px; color: #ffd166; text-align: left; }
+  .box ol { text-align: left; margin: 0 0 12px; padding-left: 24px; font-size: 14px; min-height: 30px; } .box li span { float: right; }
+  .box button { width: 100%; min-height: 48px; border: 0; border-radius: 12px; background: #ffd166; color: #2a1d00; font: 800 16px system-ui, sans-serif; cursor: pointer; }
+</style>
+<script src="https://cdn.multiplayeragent.com/sdk/mp.global.js"></script>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hint">Walk into a critter in the tall grass to catch it</div>
+<div id="toast"></div>
+<button id="fight" hidden>Battle</button>
+<div id="bpanel" hidden><div id="log"></div><div id="moves"></div></div>
+<div id="net">Connecting…</div>
+<div id="over" hidden><div class="box">
+  <h2 id="overTitle"></h2><p id="overSub"></p>
+  <h3>Most battles won</h3><ol id="board"><li>Loading…</li></ol>
+  <button id="back">Back to the field</button>
+</div></div>
+<script>
+/* ═══ MONSTER TAMER · a Multiplayer Agent starter ═════════════════════════════════════════
+ * Catch critters in the tall grass, then battle another tamer. Versus, 2 players; a bot tamer
+ * battles you when you're alone. Your team is saved.
+ *
+ * WHERE THINGS ARE (search for the "── " headers):
+ *   CONFIG ........ field size, walking, wild critters, catching, battles, the types and the moves
+ *   CONNECTION .... MP_CONNECT, joining, the offline room, who is host
+ *   FIELD ......... the map (built from a seed: grass, tall grass, trees, a pond, paths), walls
+ *   CRITTERS ...... every critter is a number: its look, name, type, stats and moves come from it
+ *   SAVES ......... your team, kept in your player save (this browser too)
+ *   WORLD (HOST) .. wild critters, the bot tamer, catches, and running battles turn by turn.
+ *                   Only the host runs this and writes the shared fields.
+ *   ME ............ walking, bumping into critters, the catching game, challenging
+ *   BATTLE VIEW ... plays each turn line by line, the battle scene, move buttons, results
+ *   DRAW .......... the field, tamers, wild critters, my team bar, the catching overlay
+ *   HUD & INPUT ... hint, battle button, keys, thumb stick and tap-to-walk
+ *
+ * HOW THE MULTIPLAYER WORKS (a relay room: no server code):
+ *   - Each player writes its OWN entity: `n`, `c`, `hb`, `p` (position, facing, walking: one JSON
+ *     field about 10 times a second) and `team` (the first three critters, for battles).
+ *   - The HOST is the lowest sessionId among live players (heartbeat seen in the last 3s). It
+ *     writes `wild` (the wild critters and who is catching which), `rival` (the bot tamer) and
+ *     `battle` (one JSON field: id, v, phase pick/over/done, both sides, both teams with health,
+ *     who is out front, the turn number, what happened last turn, the winner).
+ *   - Intents to the host: "grab" {i} (I bumped into a critter), "caught" {i, ok}, "challenge"
+ *     {to} and "move" {b, t, m} (my pick this turn; re-sent until the turn resolves, so a new host
+ *     gets it too). The host resolves a turn when both have picked, or when time runs out.
+ *   - Every client plays the last turn's lines one by one from `battle.log`, so both players see
+ *     the same moves, hits and faints. A new host carries on from the same battle field.
+ *   - Your team is YOUR save (player.data, namespace CONFIG.saveNs; this browser when offline):
+ *     catches and levels stay with you between visits.
+ *   - ?attract plays offline: catch one, then battle the bot tamer (the preview video).
+ *   - Leaderboard "wins": +1 for each battle a player wins, shown after every battle.
+ */
+
+// ── CONFIG ──────────────────────────────────────────────────────────────────────────
+const CONFIG = {
+  tile: 32,            // pixels per field tile
+  fieldW: 30,          // field size in tiles
+  fieldH: 20,
+  fieldSeed: 7,        // the field layout (the same for everyone; change it for a new field)
+  speed: 130,          // walking speed, pixels a second
+  wildCount: 7,        // wild critters in the tall grass
+  wildLevel: [2, 5],   // their level range (a little higher when your team is strong)
+  wildSpeed: 26,       // how fast wild critters wander
+  respawnMs: 4000,     // a new wild critter shows up this long after one is caught or runs
+  holdMs: 15000,       // you have this long to catch a critter you bumped into
+  catchTries: 3,       // throws before it runs away
+  shakeMs: 420,        // each wobble of the orb
+  caughtMs: 1400,      // "Caught!" shows this long
+  teamMax: 6,          // critters you can keep
+  battleSize: 3,       // critters each side brings to a battle: the first three in your team
+  turnMs: 25000,       // time to pick a move before one is picked for you
+  stepMs: 1050,        // each line of a turn ("Flumbo used Flare!") shows this long
+  resultMs: 6000,      // the battle result shows this long
+  seatGraceMs: 8000,   // a tamer silent this long loses the battle
+  rival: "Rook",       // the bot tamer who battles you when you're alone
+  saveNs: "monster-tamer", // player save namespace: your team
+  board: "wins",       // leaderboard name
+  // The types: a move of type X does double damage to the types it beats, half to the ones in `weak`.
+  types: {
+    ember: { name: "Ember", hue: 18,  beats: ["leaf"],  weak: ["tide", "ember"] },
+    tide:  { name: "Tide",  hue: 205, beats: ["ember"], weak: ["leaf", "tide"] },
+    leaf:  { name: "Leaf",  hue: 118, beats: ["tide"],  weak: ["ember", "leaf"] },
+    volt:  { name: "Volt",  hue: 48,  beats: ["tide"],  weak: ["leaf", "volt"] },
+  },
+  // The moves. power = damage strength, acc = % chance to hit, heal = share of health back, buff = next hits +50%.
+  moves: {
+    tackle:  { name: "Tackle",  type: null,    power: 40, acc: 100 },
+    flare:   { name: "Flare",   type: "ember", power: 55, acc: 95 },
+    inferno: { name: "Inferno", type: "ember", power: 90, acc: 70 },
+    bubble:  { name: "Bubble",  type: "tide",  power: 55, acc: 95 },
+    surge:   { name: "Surge",   type: "tide",  power: 90, acc: 70 },
+    vine:    { name: "Vine",    type: "leaf",  power: 55, acc: 95 },
+    bloom:   { name: "Bloom",   type: "leaf",  power: 90, acc: 70 },
+    zap:     { name: "Zap",     type: "volt",  power: 55, acc: 95 },
+    thunder: { name: "Thunder", type: "volt",  power: 90, acc: 70 },
+    focus:   { name: "Focus",   type: null,    buff: 1,   acc: 100 },
+    rest:    { name: "Rest",    type: null,    heal: 0.4, acc: 100 },
+  },
+  typeMoves: { ember: ["flare", "inferno"], tide: ["bubble", "surge"], leaf: ["vine", "bloom"], volt: ["zap", "thunder"] },
+};
+const COLORS = ["#ff5a5f", "#4f8cff", "#3ecf7a", "#ffc23d", "#ff8a3d", "#2fd4d4", "#ff6fb5", "#e8e8f0"];
+const RIVAL_COLOR = "#8a5cf6";
+const NAME_A = ["Brave", "Sunny", "Lucky", "Swift", "Quiet", "Wild"], NAME_B = ["Tamer", "Ranger", "Scout", "Keeper", "Trainer", "Rover"];
+
+// ── CONNECTION ──────────────────────────────────────────────────────────────────────
+// The builder fills these in for this game. Downloaded from GitHub? Put your own pk_ key here.
+const MP_CONNECT = {
+  key: 'pk_REPLACE_ME',
+  room: 'monster-tamer',
+  endpoint: 'wss://live.multiplayeragent.com',
+  apiUrl: 'https://api.multiplayeragent.com',
+};
+const ATTRACT = new URLSearchParams(location.search).has("attract");
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+/** Same shape as the SDK client, kept in this tab: offline play and ?attract. */
+function localRoom() {
+  const id = "local", state = { entities: { players: { [id]: {} } }, shared: {} }, subs = [];
+  let queued = false;
+  const emit = () => { if (!queued) { queued = true; queueMicrotask(() => { queued = false; subs.forEach((f) => f(state)); }); } };
+  const put = (o, k, v) => { if (typeof k === "object") Object.assign(o, k); else o[k] = v; emit(); };
+  return {
+    sessionId: id, state, offline: true,
+    me: { set: (k, v) => put(state.entities.players[id], k, v) },
+    setShared: (k, v) => put(state.shared, k, v),
+    onState: (f) => { subs.push(f); f(state); }, onJoin() {}, onLeave() {}, on() {}, send() {},
+    onDisconnect() {}, onReconnect() {}, leave: async () => {},
+  };
+}
+async function connect() {
+  if (ATTRACT || typeof MP === "undefined") return localRoom();
+  try {
+    const mp = await Promise.race([MP.join({ ...MP_CONNECT }), new Promise((_, no) => setTimeout(() => no(new Error("timed out")), 10000))]);
+    window.mp = mp; // the builder calls window.mp.leave() when the page closes
+    return mp;
+  } catch (e) {
+    console.warn("Playing offline:", e && e.message);
+    return localRoom();
+  }
+}
+const parse = (v, fb) => { if (typeof v !== "string") return fb; try { return JSON.parse(v); } catch { return fb; } };
+const memo = new Map();
+/** A shared JSON field, parsed once per change (read-only: never mutate what this returns). */
+function shared(key, fallback) {
+  const raw = S.shared[key], m = memo.get(key);
+  if (m && m.raw === raw) return m.v;
+  const v = parse(raw, fallback);
+  memo.set(key, { raw, v });
+  return v;
+}
+let net = null, S = { entities: { players: {} }, shared: {} };
+const seenHb = new Map();
+/** Players whose heartbeat moved in the last 3s (plus us), sorted by sessionId. */
+function livePlayers() {
+  const now = performance.now(), out = [];
+  for (const [id, p] of Object.entries(S.entities.players || {})) {
+    const s = seenHb.get(id);
+    if (!s || s.hb !== p.hb) seenHb.set(id, { hb: p.hb, at: now });
+    if (id === net.sessionId || now - seenHb.get(id).at < 3000) out.push(id);
+  }
+  return out.sort();
+}
+const isHost = () => livePlayers()[0] === net.sessionId;
+const stillHere = (id) => id === net.sessionId || (!!S.entities.players[id] && performance.now() - (seenHb.get(id)?.at ?? -1e9) < CONFIG.seatGraceMs);
+
+// ── FIELD ───────────────────────────────────────────────────────────────────────────
+// Tiles: "." grass, "," tall grass (critters live here), "T" tree, "~" water, "=" path, "*" flowers.
+const T = CONFIG.tile, FW = CONFIG.fieldW, FH = CONFIG.fieldH;
+function mulberry32(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+function makeField() {
+  const r = mulberry32(CONFIG.fieldSeed), g = Array.from({ length: FH }, () => Array(FW).fill(".")), cx = FW >> 1, cy = FH >> 1;
+  const blob = (bx, by, rx, ry, c) => { for (let y = 1; y < FH - 1; y++) for (let x = 1; x < FW - 1; x++) if (((x - bx) / rx) ** 2 + ((y - by) / ry) ** 2 < 1 - r() * 0.3) g[y][x] = c; };
+  blob(cx - 6, cy - 3, 3.4, 2.4, ","); // a patch right next to the start
+  for (let k = 0; k < 5; k++) blob(4 + r() * (FW - 8), 3 + r() * (FH - 6), 2.2 + r() * 2.4, 1.6 + r() * 1.6, ",");
+  blob(Math.round(FW * 0.78), Math.round(FH * 0.3), 3.2, 2.3, "~");
+  for (let x = 1; x < FW - 1; x++) if (g[cy][x] !== "~") g[cy][x] = "=";
+  for (let y = 1; y < FH - 1; y++) if (g[y][cx] !== "~") g[y][cx] = "=";
+  for (let k = 0; k < 26; k++) { const x = 1 + Math.floor(r() * (FW - 2)), y = 1 + Math.floor(r() * (FH - 2)); if (g[y][x] === "." && Math.abs(x - cx) + Math.abs(y - cy) > 4) g[y][x] = "T"; }
+  for (let k = 0; k < 34; k++) { const x = 1 + Math.floor(r() * (FW - 2)), y = 1 + Math.floor(r() * (FH - 2)); if (g[y][x] === ".") g[y][x] = "*"; }
+  for (let x = 0; x < FW; x++) g[0][x] = g[FH - 1][x] = "T";
+  for (let y = 0; y < FH; y++) g[y][0] = g[y][FW - 1] = "T";
+  return g;
+}
+const FIELD = makeField();
+const tileAt = (x, y) => FIELD[Math.floor(y / T)]?.[Math.floor(x / T)] ?? "T";
+const solid = (x, y) => { const c = tileAt(x, y); return c === "T" || c === "~"; };
+const blocked = (x, y, r) => solid(x - r, y - r) || solid(x + r, y - r) || solid(x - r, y + r) || solid(x + r, y + r);
+/** Move a body, sliding along walls. */
+function moveBody(e, dx, dy, r = 9) { const stuck = blocked(e.x, e.y, r); if (stuck || !blocked(e.x + dx, e.y, r)) e.x += dx; if (stuck || !blocked(e.x, e.y + dy, r)) e.y += dy; }
+const SPAWN = { x: ((FW >> 1) + 0.5) * T, y: ((FH >> 1) + 0.5) * T };
+const GRASS = []; FIELD.forEach((row, y) => row.forEach((c, x) => { if (c === ",") GRASS.push([x, y]); }));
+const WALKABLE = []; FIELD.forEach((row, y) => row.forEach((c, x) => { if (c !== "T" && c !== "~") WALKABLE.push([x, y]); }));
+
+// ── CRITTERS ────────────────────────────────────────────────────────────────────────
+// A critter is { s: seed, lv: level, xp }. Everything else (type, name, look, stats, moves) comes from the seed.
+const TYPE_KEYS = Object.keys(CONFIG.types);
+const SYL = { ember: ["Pyr", "Cind", "Blaz", "Emb", "Scor", "Fla"], tide: ["Aqu", "Drip", "Flo", "Wav", "Bub", "Spla"], leaf: ["Spro", "Fern", "Moss", "Bud", "Thi", "Pet"], volt: ["Zap", "Volt", "Spar", "Fizz", "Jol", "Buzz"] };
+const ENDS = ["y", "o", "let", "bit", "kin", "ling", "ox", "ee", "ix", "umo", "ip", "a"];
+const speciesCache = new Map();
+function species(seed) {
+  let sp = speciesCache.get(seed);
+  if (sp) return sp;
+  const r = mulberry32(seed * 7919 + 17), pick = (a) => a[Math.floor(r() * a.length)];
+  const type = TYPE_KEYS[Math.floor(r() * TYPE_KEYS.length)], hue = CONFIG.types[type].hue + (r() - 0.5) * 34, sat = 62 + r() * 22, light = 56 + r() * 10;
+  sp = {
+    seed, type, name: pick(SYL[type]) + pick(ENDS),
+    color: `hsl(${hue},${sat}%,${light}%)`, dark: `hsl(${hue},${sat}%,${light - 26}%)`, belly: `hsl(${hue + 25},${sat - 25}%,${Math.min(92, light + 24)}%)`,
+    w: 0.85 + r() * 0.3, h: 0.78 + r() * 0.3, bumps: Array.from({ length: 10 }, () => 0.9 + r() * 0.18),
+    ears: Math.floor(r() * 5), eyes: r() < 0.12 ? 1 : r() < 0.12 ? 3 : 2, eye: 0.12 + r() * 0.07, mouth: Math.floor(r() * 3), tail: Math.floor(r() * 3), feet: r() < 0.8,
+    spots: r() < 0.5 ? Array.from({ length: 2 + Math.floor(r() * 3) }, () => [r() * 1.1 - 0.75, r() * 0.7 - 0.45, 0.07 + r() * 0.07]) : [],
+    base: { hp: 40 + Math.floor(r() * 18), atk: 10 + Math.floor(r() * 8), def: 10 + Math.floor(r() * 8), spd: 6 + Math.floor(r() * 14) },
+  };
+  sp.moves = ["tackle", CONFIG.typeMoves[type][0], pick([CONFIG.typeMoves[type][1], "focus", "rest"])];
+  speciesCache.set(seed, sp);
+  return sp;
+}
+const grow = (base, lv) => Math.round(base * (0.6 + lv * 0.08));
+function stats(c) { const b = species(c.s).base; return { hp: grow(b.hp, c.lv) + 5, atk: grow(b.atk, c.lv), def: grow(b.def, c.lv), spd: grow(b.spd, c.lv) }; }
+const xpNeed = (lv) => 8 + lv * 4;
+const typeColor = (t, l = 52) => (t ? `hsl(${CONFIG.types[t].hue},80%,${l}%)` : "#7d8399");
+function typeMult(moveType, defType) { if (!moveType) return 1; const X = CONFIG.types[moveType]; return X.beats.includes(defType) ? 2 : X.weak.includes(defType) ? 0.5 : 1; }
+/** A random critter seed (of a given type, if asked). */
+function newSeed(type) { for (let k = 0; k < 400; k++) { const s = 1 + Math.floor(Math.random() * 99999999); if (!type || species(s).type === type) return s; } return 1; }
+/** Draw a critter at (x, y), size R, facing right (face 1) or left (-1). */
+function drawCritter(c2, sp, x, y, R, o = {}) {
+  const t = o.t || 0, bob = Math.sin(t * 4 + sp.seed) * R * 0.05, w = R * sp.w, h = R * sp.h;
+  c2.save(); c2.translate(x, y); c2.globalAlpha = o.alpha ?? 1;
+  c2.fillStyle = "#0004"; c2.beginPath(); c2.ellipse(0, h * 0.62, w * 0.7, R * 0.16, 0, 0, Math.PI * 2); c2.fill();
+  c2.translate(0, bob - (o.lift || 0)); c2.scale((o.face || 1) * (o.scale || 1), o.scale || 1);
+  const col = o.flash ? "#ffffff" : sp.color, dark = o.flash ? "#ffffff" : sp.dark, lw = Math.max(1, R * 0.05);
+  c2.lineWidth = lw; c2.lineCap = "round"; c2.lineJoin = "round";
+  // tail, behind the body
+  if (sp.tail === 1) { c2.strokeStyle = dark; c2.lineWidth = R * 0.14; c2.beginPath(); c2.moveTo(-w * 0.5, h * 0.1); c2.quadraticCurveTo(-w * 1.0, h * 0.05, -w * 0.85, -h * 0.35); c2.stroke(); c2.lineWidth = lw; }
+  if (sp.tail === 2) { c2.fillStyle = dark; c2.beginPath(); c2.arc(-w * 0.62, h * 0.12, R * 0.14, 0, Math.PI * 2); c2.fill(); }
+  if (sp.type === "volt") { c2.strokeStyle = "#ffe14d"; c2.lineWidth = R * 0.1; c2.beginPath(); c2.moveTo(-w * 0.5, 0); c2.lineTo(-w * 0.8, -h * 0.2); c2.lineTo(-w * 0.65, -h * 0.28); c2.lineTo(-w * 0.95, -h * 0.55); c2.stroke(); c2.lineWidth = lw; }
+  if (sp.feet) { c2.fillStyle = dark; for (const s of [-1, 1]) { c2.beginPath(); c2.ellipse(s * w * 0.32, h * 0.5, w * 0.17, h * 0.12, 0, 0, Math.PI * 2); c2.fill(); } }
+  // the body: a soft blob
+  const pts = sp.bumps.map((b, i) => { const a = (i / sp.bumps.length) * Math.PI * 2; return [Math.cos(a) * w * 0.62 * b, Math.sin(a) * h * 0.55 * b]; });
+  const mid = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+  c2.fillStyle = col; c2.strokeStyle = dark; c2.beginPath();
+  let m0 = mid(pts[pts.length - 1], pts[0]); c2.moveTo(m0[0], m0[1]);
+  pts.forEach((p, i) => { const m = mid(p, pts[(i + 1) % pts.length]); c2.quadraticCurveTo(p[0], p[1], m[0], m[1]); });
+  c2.fill(); c2.stroke();
+  c2.fillStyle = o.flash ? "#fff" : sp.belly; c2.beginPath(); c2.ellipse(w * 0.14, h * 0.2, w * 0.3, h * 0.24, 0, 0, Math.PI * 2); c2.fill();
+  c2.fillStyle = dark; c2.globalAlpha = (o.alpha ?? 1) * 0.45;
+  for (const [sx, sy, sr] of sp.spots) { c2.beginPath(); c2.arc(sx * w * 0.6, sy * h * 0.6, sr * R, 0, Math.PI * 2); c2.fill(); }
+  c2.globalAlpha = o.alpha ?? 1;
+  // ears or horns
+  const top = -h * 0.48;
+  c2.fillStyle = col;
+  if (sp.ears === 1) for (const s of [-0.1, 0.32]) { c2.beginPath(); c2.moveTo(w * (s - 0.14), top + h * 0.08); c2.lineTo(w * (s + 0.02), top - h * 0.38); c2.lineTo(w * (s + 0.16), top + h * 0.1); c2.fill(); c2.stroke(); }
+  if (sp.ears === 2) for (const s of [-0.12, 0.34]) { c2.beginPath(); c2.arc(w * s, top + h * 0.02, R * 0.16, 0, Math.PI * 2); c2.fill(); c2.stroke(); }
+  if (sp.ears === 3) for (const s of [0, 0.3]) { c2.strokeStyle = dark; c2.beginPath(); c2.moveTo(w * s, top + h * 0.05); c2.lineTo(w * (s + 0.08), top - h * 0.32); c2.stroke(); c2.fillStyle = dark; c2.beginPath(); c2.arc(w * (s + 0.08), top - h * 0.34, R * 0.07, 0, Math.PI * 2); c2.fill(); }
+  if (sp.ears === 4) { c2.fillStyle = "#f3ead2"; for (const s of [-0.05, 0.35]) { c2.beginPath(); c2.moveTo(w * (s - 0.08), top + h * 0.08); c2.quadraticCurveTo(w * (s - 0.12), top - h * 0.2, w * (s + 0.08), top - h * 0.28); c2.lineTo(w * (s + 0.06), top + h * 0.1); c2.fill(); } }
+  // a mark of its type on top
+  if (sp.type === "ember") { const f = Math.sin(t * 12) * R * 0.03; c2.fillStyle = "#ff9a2e"; c2.beginPath(); c2.moveTo(-w * 0.32, top + h * 0.12); c2.quadraticCurveTo(-w * 0.5, top - h * 0.18, -w * 0.28 + f, top - h * 0.42); c2.quadraticCurveTo(-w * 0.12, top - h * 0.12, -w * 0.18, top + h * 0.12); c2.fill(); c2.fillStyle = "#ffe066"; c2.beginPath(); c2.arc(-w * 0.26, top, R * 0.07, 0, Math.PI * 2); c2.fill(); }
+  if (sp.type === "tide") { c2.fillStyle = o.flash ? "#fff" : sp.belly; c2.beginPath(); c2.moveTo(-w * 0.5, -h * 0.2); c2.quadraticCurveTo(-w * 0.55, top - h * 0.25, -w * 0.12, top + h * 0.04); c2.closePath(); c2.fill(); c2.stroke(); }
+  if (sp.type === "leaf") { c2.strokeStyle = "#2f7d32"; c2.beginPath(); c2.moveTo(w * 0.1, top + h * 0.05); c2.lineTo(w * 0.12, top - h * 0.18); c2.stroke(); c2.fillStyle = "#57c85a"; for (const s of [-1, 1]) { c2.beginPath(); c2.ellipse(w * 0.12 + s * R * 0.14, top - h * 0.22, R * 0.15, R * 0.07, s * 0.5, 0, Math.PI * 2); c2.fill(); } }
+  // face (looking right)
+  const ey = -h * 0.1, es = R * sp.eye, xs = sp.eyes === 1 ? [w * 0.22] : sp.eyes === 3 ? [w * 0.0, w * 0.22, w * 0.44] : [w * 0.08, w * 0.38];
+  for (const ex of xs) {
+    c2.fillStyle = "#fff"; c2.beginPath(); c2.arc(ex, ey, es, 0, Math.PI * 2); c2.fill();
+    c2.fillStyle = "#1a1726"; c2.beginPath(); c2.arc(ex + es * 0.28, ey + es * 0.08, es * 0.58, 0, Math.PI * 2); c2.fill();
+    c2.fillStyle = "#fff"; c2.beginPath(); c2.arc(ex + es * 0.42, ey - es * 0.22, es * 0.2, 0, Math.PI * 2); c2.fill();
+  }
+  c2.strokeStyle = "#1a1726"; c2.fillStyle = "#1a1726"; const mx = w * 0.26, my = h * 0.12;
+  if (sp.mouth === 0) { c2.beginPath(); c2.arc(mx, my - R * 0.06, R * 0.11, 0.2, Math.PI - 0.2); c2.stroke(); }
+  if (sp.mouth === 1) { c2.beginPath(); c2.ellipse(mx, my, R * 0.06, R * 0.08, 0, 0, Math.PI * 2); c2.fill(); }
+  if (sp.mouth === 2) { c2.beginPath(); c2.arc(mx, my - R * 0.08, R * 0.13, 0.3, Math.PI - 0.3); c2.stroke(); c2.fillStyle = "#fff"; for (const s of [-1, 1]) { c2.beginPath(); c2.moveTo(mx + s * R * 0.06, my + R * 0.02); c2.lineTo(mx + s * R * 0.03, my + R * 0.1); c2.lineTo(mx + s * R * 0.0, my + R * 0.03); c2.fill(); } }
+  c2.fillStyle = "#ff7aa255"; c2.beginPath(); c2.arc(w * 0.46, h * 0.04, R * 0.08, 0, Math.PI * 2); c2.fill();
+  c2.restore();
+}
+
+// ── SAVES ───────────────────────────────────────────────────────────────────────────
+// { team: [{ s, lv, xp }], wins, caught }. Online in player.data (namespace CONFIG.saveNs), always mirrored to this browser.
+let save = { team: [], wins: 0, caught: 0 }, player = null, board = null, saveTimer = 0, cloudReady = false;
+function cleanSave(d) {
+  if (!d || !Array.isArray(d.team)) return null;
+  const team = d.team.filter((c) => c && +c.s > 0 && +c.lv >= 1).slice(0, CONFIG.teamMax).map((c) => ({ s: Math.floor(+c.s), lv: Math.min(50, Math.floor(+c.lv)), xp: Math.max(0, Math.floor(+c.xp || 0)) }));
+  return { team, wins: Math.floor(+d.wins || 0), caught: Math.floor(+d.caught || 0) };
+}
+function readLocal() { try { return cleanSave(JSON.parse(localStorage.getItem(CONFIG.saveNs) || "null")); } catch { return null; } }
+/** The cloud copy wins if it has a team and at least as much progress as this browser's. Until it is read, nothing is written to the cloud. */
+function loadCloud() {
+  if (!player) { cloudReady = true; return; }
+  player.data.get(CONFIG.saveNs).then((r) => {
+    const cloud = cleanSave(r && r.data);
+    if (cloud && cloud.team.length && cloud.caught + cloud.wins >= save.caught + save.wins) { save = cloud; publishTeam(); }
+  }).catch(() => {}).finally(() => { cloudReady = true; writeSave(); });
+}
+function writeSave() {
+  publishTeam();
+  if (ATTRACT) return;
+  try { localStorage.setItem(CONFIG.saveNs, JSON.stringify(save)); } catch {}
+  if (!cloudReady) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    if (player) player.data.set(save, { namespace: CONFIG.saveNs }).catch(() => player.data.get(CONFIG.saveNs).then(() => player.data.set(save, { namespace: CONFIG.saveNs }))).catch(() => {});
+  }, 1200);
+}
+const battleTeam = () => save.team.slice(0, CONFIG.battleSize);
+function publishTeam() { net.me.set("team", JSON.stringify(battleTeam().map((c) => ({ s: c.s, lv: c.lv })))); }
+/** Add a caught critter; a full team sends its weakest one home. */
+function addToTeam(c) {
+  let note = "";
+  if (save.team.length >= CONFIG.teamMax) {
+    const weakest = save.team.reduce((w, x, i) => (i >= CONFIG.battleSize && x.lv < save.team[w].lv ? i : w), CONFIG.battleSize);
+    note = ` ${species(save.team[weakest].s).name} went home to make room.`;
+    save.team.splice(weakest, 1);
+  }
+  save.team.push(c); save.caught++; writeSave();
+  return note;
+}
+
+// ── WORLD (HOST) ────────────────────────────────────────────────────────────────────
+const host = { last: null, wasHost: false, wild: [], nextWild: 1, respawn: [], rival: null, lastWild: 0, lastRival: 0, picks: new Map(), dirty: false };
+/** The battle as state has it, or the host's own newer write that hasn't come back yet. */
+function battle() {
+  const b = shared("battle", null);
+  return host.last && isHost() && (!b || host.last.v > b.v) ? host.last : b;
+}
+function writeBattle(b) { b = { ...b, v: (battle()?.v ?? 0) + 1 }; host.last = b; net.setShared("battle", JSON.stringify(b)); return b; }
+const busyBattle = (b) => !!b && b.phase !== "done";
+const inBattle = (id) => { const b = battle(); return busyBattle(b) && b.sides.some((s) => s.i === id); };
+const colorOf = (id) => (id === "bot" ? RIVAL_COLOR : id === net.sessionId ? myColor : S.entities.players[id]?.c || COLORS[0]);
+const nameOf = (id) => (id === "bot" ? CONFIG.rival : id === net.sessionId ? myName : S.entities.players[id]?.n || "Tamer");
+function posOf(id) { if (id === net.sessionId) return me; const p = parse(S.entities.players[id]?.p, null); return p && typeof p.x === "number" ? p : null; }
+const holding = (id) => wildList().some((w) => w.h === id);
+/** Become host: take the wild critters and the bot tamer over as state has them. */
+function adoptWorld() {
+  host.wild = parse(S.shared.wild, []).map((w) => ({ ...w, tx: w.x, ty: w.y, wait: 1, hu: Date.now() + CONFIG.holdMs }));
+  host.nextWild = Math.max(0, ...host.wild.map((w) => w.i)) + 1;
+  host.respawn = [];
+  const rv = parse(S.shared.rival, null);
+  host.rival = rv ? { ...rv, tx: rv.x, ty: rv.y, wait: 1 } : { x: SPAWN.x + 3 * T, y: SPAWN.y + 2 * T, f: -1, m: 0, tx: SPAWN.x + 3 * T, ty: SPAWN.y + 2 * T, wait: 2, on: 1, say: "" };
+}
+function spawnWild(nearStart) {
+  const avg = livePlayers().map((id) => (id === net.sessionId ? battleTeam() : parse(S.entities.players[id]?.team, []))).flat().reduce((a, c, i, all) => a + c.lv / all.length, 0);
+  let [tx, ty] = GRASS[Math.floor(Math.random() * GRASS.length)];
+  if (nearStart) [tx, ty] = GRASS.slice().sort((p, q) => Math.hypot(p[0] * T - SPAWN.x + 80, p[1] * T - SPAWN.y + 60) - Math.hypot(q[0] * T - SPAWN.x + 80, q[1] * T - SPAWN.y + 60))[0];
+  const lv = CONFIG.wildLevel[0] + Math.floor(Math.random() * (CONFIG.wildLevel[1] - CONFIG.wildLevel[0] + 1)) + Math.floor(avg / 5);
+  const x = (tx + 0.5) * T, y = (ty + 0.5) * T;
+  host.wild.push({ i: host.nextWild++, s: newSeed(), x, y, lv, f: 1, h: "", hu: 0, tx: x, ty: y, wait: Math.random() * 2 });
+}
+/** Wild critters wander inside the tall grass; a held one waits to be caught. */
+function wildTick(dt, now) {
+  const t = Date.now();
+  if (!host.wild.length && !host.respawn.length) spawnWild(true);
+  while (host.wild.length + host.respawn.length < CONFIG.wildCount) host.respawn.push(t + (host.wild.length < 3 ? 0 : CONFIG.respawnMs));
+  host.respawn = host.respawn.filter((at) => (at <= t ? (spawnWild(false), false) : true));
+  for (const w of host.wild) {
+    if (w.h) { if (t > w.hu || !stillHere(w.h)) w.h = ""; continue; }
+    if (w.wait > 0) { w.wait -= dt; continue; }
+    const dx = w.tx - w.x, dy = w.ty - w.y, d = Math.hypot(dx, dy);
+    if (d < 2) {
+      const near = GRASS.filter(([gx, gy]) => Math.abs(gx * T - w.x) < T * 3 && Math.abs(gy * T - w.y) < T * 3);
+      const [gx, gy] = near.length ? near[Math.floor(Math.random() * near.length)] : GRASS[0];
+      w.tx = (gx + 0.5) * T; w.ty = (gy + 0.5) * T; w.wait = 0.6 + Math.random() * 2.2; continue;
+    }
+    const step = Math.min(d, CONFIG.wildSpeed * dt);
+    w.x += (dx / d) * step; w.y += (dy / d) * step; w.f = dx >= 0 ? 1 : -1;
+  }
+  if (now - host.lastWild > 160) { // ~6 times a second
+    host.lastWild = now;
+    net.setShared("wild", JSON.stringify(host.wild.map((w) => ({ i: w.i, s: w.s, x: Math.round(w.x), y: Math.round(w.y), lv: w.lv, f: w.f, h: w.h }))));
+  }
+}
+/** The bot tamer is out when you're alone (or while it's battling). It wanders, and comes to say hi. */
+function rivalOn() { const b = battle(); return ATTRACT || livePlayers().length === 1 || (busyBattle(b) && b.sides.some((s) => s.i === "bot")); }
+function rivalTick(dt, now) {
+  const R = host.rival;
+  R.on = rivalOn() ? 1 : 0;
+  const human = livePlayers().map(posOf).find(Boolean), d2h = human ? Math.hypot(human.x - R.x, human.y - R.y) : 1e9;
+  R.say = R.on && !inBattle("bot") && d2h < 110 ? "Battle me!" : "";
+  R.m = 0;
+  if (!inBattle("bot")) {
+    if (R.wait > 0) R.wait -= dt;
+    else {
+      const dx = R.tx - R.x, dy = R.ty - R.y, d = Math.hypot(dx, dy);
+      if (d < 3 || R.stuck > 1) {
+        const go = human && Math.random() < 0.35 ? [Math.floor(human.x / T) + (Math.random() < 0.5 ? -2 : 2), Math.floor(human.y / T)] : WALKABLE[Math.floor(Math.random() * WALKABLE.length)];
+        R.tx = (go[0] + 0.5) * T; R.ty = (go[1] + 0.5) * T; R.wait = 0.8 + Math.random() * 2.5; R.stuck = 0;
+      } else {
+        const bx = R.x, by = R.y, step = Math.min(d, CONFIG.speed * 0.6 * dt);
+        moveBody(R, (dx / d) * step, (dy / d) * step); R.m = 1; R.f = dx >= 0 ? 1 : -1;
+        R.stuck = Math.hypot(R.x - bx, R.y - by) < step * 0.3 ? (R.stuck || 0) + dt : 0;
+      }
+    }
+  }
+  if (now - host.lastRival > 160) { host.lastRival = now; net.setShared("rival", JSON.stringify({ x: Math.round(R.x), y: Math.round(R.y), f: R.f, m: R.m, on: R.on, say: R.say })); }
+}
+/** A "grab" intent: the player bumped into a free wild critter, so it's theirs to catch for a while. */
+function applyGrab(from, d) {
+  const w = host.wild.find((x) => x.i === d?.i), p = posOf(from);
+  if (!w || w.h || !p || Math.hypot(p.x - w.x, p.y - w.y) > 80 || inBattle(from) || holding(from)) return;
+  w.h = from; w.hu = Date.now() + CONFIG.holdMs;
+}
+/** A "caught" intent: caught or ran away, it leaves the field and a new one comes later. */
+function applyCaught(from, d) {
+  const i = host.wild.findIndex((x) => x.i === d?.i && x.h === from);
+  if (i < 0) return;
+  host.wild.splice(i, 1); host.respawn.push(Date.now() + CONFIG.respawnMs);
+}
+/** A team from a player's `team` field (checked), or the bot tamer's team matched to its opponent. */
+function teamOf(id, foe) {
+  if (id === "bot") { const avg = foe.reduce((n, c) => n + c.lv, 0) / foe.length; return foe.map((_, i) => ({ s: newSeed(ATTRACT ? ["ember", "volt"][i % 2] : null), lv: Math.max(1, Math.round(avg - 1 + Math.random() * 1.6)) })); }
+  const raw = id === net.sessionId ? battleTeam() : parse(S.entities.players[id]?.team, []);
+  return (Array.isArray(raw) ? raw : []).filter((c) => c && +c.s > 0 && +c.lv >= 1 && +c.lv <= 50).slice(0, CONFIG.battleSize).map((c) => ({ s: Math.floor(+c.s), lv: Math.floor(+c.lv) }));
+}
+const fighter = (c) => { const st = stats(c); return { s: c.s, lv: c.lv, hp: st.hp, max: st.hp, st: 0 }; };
+/** A "challenge" intent: start a battle if both tamers are free and have critters. */
+function applyChallenge(from, d) {
+  const b = battle(), to = d && d.to;
+  if (busyBattle(b) || !to || from === to || (to === "bot" ? !rivalOn() : !livePlayers().includes(to)) || holding(from) || (to !== "bot" && holding(to))) return;
+  const ta = teamOf(from), tb = ta.length ? teamOf(to, ta) : [];
+  if (!ta.length || !tb.length) return;
+  const side = (id) => ({ i: id, n: nameOf(id), c: colorOf(id) });
+  host.picks.clear();
+  writeBattle({ id: (b?.id ?? 0) + 1, phase: "pick", sides: [side(from), side(to)], teams: [ta.map(fighter), tb.map(fighter)], act: [0, 0], turn: 1, log: [{ k: "start" }],
+    endsAt: Date.now() + CONFIG.stepMs * 1.5 + CONFIG.turnMs, winner: -1 });
+}
+/** A "move" intent: a tamer's pick for this turn (a move 0–2, or "s1" to switch to critter 1). */
+function applyMove(from, d) {
+  const b = battle();
+  if (!b || b.phase !== "pick" || !d || d.b !== b.id || d.t !== b.turn) return;
+  const side = b.sides.findIndex((s) => s.i === from), ok = [0, 1, 2].includes(d.m) || (typeof d.m === "string" && /^s[0-5]$/.test(d.m));
+  if (side < 0 || !ok) return;
+  const key = b.id + ":" + b.turn, picks = host.picks.get(key) || [null, null];
+  picks[side] = d.m; host.picks.set(key, picks);
+}
+/** The bot's pick (and anyone's whose time ran out): the strongest-looking move, with some luck. */
+function botPick(teams, act, side) {
+  const meC = teams[side][act[side]], foe = teams[1 - side][act[1 - side]], sp = species(meC.s), ft = species(foe.s).type;
+  if (meC.hp < meC.max * 0.3 && sp.moves.includes("rest") && Math.random() < 0.6) return sp.moves.indexOf("rest");
+  let best = 0, bv = -1;
+  sp.moves.forEach((k, i) => {
+    const M = CONFIG.moves[k];
+    let v = M.power ? M.power * (M.acc / 100) * typeMult(M.type, ft) : M.buff && meC.st < 2 && meC.hp > meC.max * 0.6 ? 50 : 0;
+    v *= 0.7 + Math.random() * 0.6;
+    if (v > bv) { bv = v; best = i; }
+  });
+  return best;
+}
+/** One turn: switches first, then the faster critter moves. Everything that happens goes in `log`. */
+function resolveTurn(b) {
+  const key = b.id + ":" + b.turn, picks = (host.picks.get(key) || [null, null]).slice();
+  const teams = b.teams.map((t) => t.map((c) => ({ ...c }))), act = b.act.slice(), log = [];
+  for (const s of [0, 1]) if (picks[s] === null || b.sides[s].i === "bot") picks[s] = botPick(teams, act, s);
+  for (const s of [0, 1]) if (typeof picks[s] === "string") {
+    const i = +picks[s].slice(1);
+    if (teams[s][i] && teams[s][i].hp > 0 && i !== act[s]) { act[s] = i; log.push({ k: "send", s, i }); }
+    picks[s] = -1;
+  }
+  const order = [0, 1].filter((s) => picks[s] >= 0).sort((p, q) => stats(teams[q][act[q]]).spd - stats(teams[p][act[p]]).spd || Math.random() - 0.5);
+  for (const s of order) {
+    const a = teams[s][act[s]], foe = teams[1 - s][act[1 - s]];
+    if (a.hp <= 0 || foe.hp <= 0) continue;
+    const mk = species(a.s).moves[picks[s]] || "tackle", M = CONFIG.moves[mk];
+    log.push({ k: "use", s, m: mk });
+    if (Math.random() * 100 >= M.acc) { log.push({ k: "miss", s }); continue; }
+    if (M.heal) { a.hp = Math.min(a.max, a.hp + Math.round(a.max * M.heal)); log.push({ k: "heal", s, hp: a.hp }); continue; }
+    if (M.buff) { a.st = Math.min(2, a.st + 1); log.push({ k: "buff", s }); continue; }
+    const A = stats(a), D = stats(foe), eff = typeMult(M.type, species(foe.s).type), crit = Math.random() < 0.08;
+    const dmg = Math.max(1, Math.round(M.power * 0.3 * (A.atk * (1 + 0.5 * a.st)) / D.def * eff * (0.85 + Math.random() * 0.15) * (crit ? 1.5 : 1) * (0.8 + a.lv * 0.04)));
+    foe.hp = Math.max(0, foe.hp - dmg);
+    log.push({ k: "hit", s: 1 - s, n: dmg, hp: foe.hp, e: eff, c: crit ? 1 : 0, t: M.type || "" });
+    if (!foe.hp) log.push({ k: "faint", s: 1 - s });
+  }
+  for (const s of [0, 1]) if (teams[s][act[s]].hp <= 0) { const next = teams[s].findIndex((c) => c.hp > 0); if (next >= 0) { act[s] = next; log.push({ k: "send", s, i: next }); } }
+  host.picks.delete(key);
+  const out = [0, 1].map((s) => !teams[s].some((c) => c.hp > 0)), anim = log.length * CONFIG.stepMs;
+  if (out[0] || out[1]) {
+    const winner = out[0] && out[1] ? -2 : out[0] ? 1 : 0;
+    log.push({ k: "end", w: winner });
+    return writeBattle({ ...b, teams, act, log, turn: b.turn + 1, phase: "over", winner, endsAt: Date.now() + anim + CONFIG.stepMs + CONFIG.resultMs });
+  }
+  return writeBattle({ ...b, teams, act, log, turn: b.turn + 1, endsAt: Date.now() + anim + CONFIG.turnMs });
+}
+function battleTick() {
+  const b = battle(), t = Date.now();
+  if (!b) return;
+  if (b.phase === "pick") {
+    const gone = b.sides.findIndex((s) => s.i !== "bot" && !stillHere(s.i));
+    if (gone >= 0) return writeBattle({ ...b, phase: "over", winner: 1 - gone, turn: b.turn + 1, log: [{ k: "flee", s: gone }, { k: "end", w: 1 - gone }], endsAt: t + CONFIG.stepMs * 2 + CONFIG.resultMs });
+    const picks = host.picks.get(b.id + ":" + b.turn) || [null, null];
+    if ([0, 1].every((s) => b.sides[s].i === "bot" || picks[s] !== null) || t > b.endsAt) resolveTurn(b);
+  } else if (b.phase === "over" && t > b.endsAt) writeBattle({ ...b, phase: "done", log: [] });
+}
+function hostTick(dt, now) {
+  if (!host.wasHost) { host.wasHost = true; adoptWorld(); } // a new host carries on from state
+  wildTick(dt, now); rivalTick(dt, now); battleTick();
+}
+
+// ── ME ──────────────────────────────────────────────────────────────────────────────
+const me = { x: SPAWN.x, y: SPAWN.y, f: 1, m: 0, goal: null, lastSend: 0, bump: new Map(), done: new Set() };
+const input = { x: 0, y: 0 };
+let myName = "", myColor = COLORS[0], catching = null, hintOff = false;
+const wildList = () => (isHost() ? host.wild : shared("wild", []));
+function rivalNow() { return isHost() && host.rival ? host.rival : shared("rival", null); }
+function publishPos(force) {
+  const now = performance.now();
+  if (!force && now - me.lastSend < 100) return; // ~10 times a second
+  me.lastSend = now;
+  net.me.set("p", JSON.stringify({ x: Math.round(me.x), y: Math.round(me.y), f: me.f, m: me.m }));
+}
+function myTick(dt, now) {
+  if (inBattle(net.sessionId) || catching) { me.m = 0; me.goal = null; publishPos(); return; }
+  let ix = input.x, iy = input.y;
+  if (ATTRACT) autopilot();
+  if (!ix && !iy && me.goal) { const dx = me.goal.x - me.x, dy = me.goal.y - me.y, d = Math.hypot(dx, dy); if (d < 4) me.goal = null; else { ix = dx / d; iy = dy / d; } }
+  const len = Math.hypot(ix, iy);
+  if (len > 1) { ix /= len; iy /= len; }
+  me.m = len > 0.05 ? 1 : 0;
+  if (me.m) {
+    const bx = me.x, by = me.y;
+    moveBody(me, ix * CONFIG.speed * dt, iy * CONFIG.speed * dt);
+    if (Math.abs(ix) > 0.1) me.f = ix > 0 ? 1 : -1;
+    if (me.goal && Math.hypot(me.x - bx, me.y - by) < CONFIG.speed * dt * 0.2) me.goal = null; // walked into a wall
+  }
+  for (const w of wildList()) { // bump into a free wild critter to try to catch it
+    if (w.h || Math.hypot(w.x - me.x, w.y - me.y) > 24 || now < (me.bump.get(w.i) || 0)) continue;
+    me.bump.set(w.i, now + 1500);
+    if (isHost()) applyGrab(net.sessionId, { i: w.i }); else net.send("grab", { i: w.i });
+    break;
+  }
+  publishPos();
+}
+/** The preview's own tamer: catch the nearest critter, then go battle the bot tamer. */
+function autopilot() {
+  if (save.caught < 1) { const w = wildList().filter((x) => !x.h).sort((p, q) => Math.hypot(p.x - me.x, p.y - me.y) - Math.hypot(q.x - me.x, q.y - me.y))[0]; if (w) me.goal = { x: w.x, y: w.y }; }
+  else if (!busyBattle(battle())) challenge("bot");
+}
+// The catching game: a ring shrinks and grows; throw when it sits on the green circle.
+const ringAt = (c, now) => { const p = ((now - c.t0) / 1000) % 2; return 0.18 + 0.82 * (p < 1 ? 1 - p : p - 1); };
+function catchTick(now) {
+  if (!catching) {
+    const w = wildList().find((x) => x.h === net.sessionId && !me.done.has(x.i));
+    if (w && !inBattle(net.sessionId)) { catching = { w: { i: w.i, s: w.s, lv: w.lv }, t0: now, tries: 0, phase: "aim", at: now, text: "Tap when the ring hits the green circle!" }; hintOff = true; }
+    return;
+  }
+  const c = catching;
+  if (c.phase === "aim" && ATTRACT && now - c.at > 500 && Math.abs(ringAt(c, now) - 0.3) < 0.03) throwOrb(now);
+  if (c.phase === "throw" && now - c.at > 450) { c.phase = "shake"; c.at = now; sound(300, 0.08); }
+  if (c.phase === "shake" && now - c.at > c.shakes * CONFIG.shakeMs + 200) {
+    c.at = now;
+    if (c.ok) { c.phase = "done"; const note = addToTeam({ s: c.w.s, lv: c.w.lv, xp: 0 }); c.text = `Caught ${species(c.w.s).name}!${note}`; sound(880, 0.35, 0.3); burstScreen(36); }
+    else if (++c.tries >= CONFIG.catchTries) { c.phase = "fled"; c.text = `${species(c.w.s).name} ran away!`; sound(160, 0.3); }
+    else { c.phase = "aim"; c.text = `It broke free! ${CONFIG.catchTries - c.tries} throw${CONFIG.catchTries - c.tries === 1 ? "" : "s"} left`; sound(200, 0.15); }
+  }
+  if ((c.phase === "done" || c.phase === "fled") && now - c.at > CONFIG.caughtMs) {
+    if (isHost()) applyCaught(net.sessionId, { i: c.w.i, ok: c.ok }); else net.send("caught", { i: c.w.i, ok: c.ok });
+    me.done.add(c.w.i); catching = null;
+  }
+}
+function throwOrb(now) {
+  const c = catching;
+  if (!c || c.phase !== "aim") return;
+  const q = Math.max(0, 1 - Math.abs(ringAt(c, now) - 0.3) / 0.35), chance = Math.max(0.08, Math.min(1, 0.15 + 0.85 * q - (c.w.lv - 3) * 0.03));
+  c.ok = ATTRACT || Math.random() < chance; c.shakes = c.ok ? 3 : 1 + Math.floor(Math.random() * 2);
+  c.phase = "throw"; c.at = now; c.text = q > 0.85 ? "Perfect throw!" : q > 0.5 ? "Nice throw!" : "Wobbly throw…";
+  sound(520, 0.12);
+}
+/** Ask for a battle: the other tamer in the room, or the bot tamer when you're alone. */
+function opponent() {
+  const other = livePlayers().find((id) => id !== net.sessionId);
+  if (other) return other;
+  const r = rivalNow();
+  return r && r.on ? "bot" : null;
+}
+function challenge(to) {
+  if (!to || !battleTeam().length || busyBattle(battle()) || catching) return;
+  if (isHost()) applyChallenge(net.sessionId, { to }); else net.send("challenge", { to });
+}
+
+// ── BATTLE VIEW ─────────────────────────────────────────────────────────────────────
+// Each client plays the last turn's `log` line by line, then shows the move buttons.
+const bv = { id: -1, turn: 0, queue: [], cur: null, at: 0, hp: [[], []], shown: [0, 0], act: [0, 0], text: "", lunge: [-9, -9], flash: [-9, -9], faint: [false, false], faintAt: [0, 0], enter: [0, 0], picked: null, switching: false, resendAt: 0, xpFor: -1, movesKey: "" };
+const mySideOf = (b) => (b ? b.sides.findIndex((s) => s.i === net.sessionId) : -1);
+const critterIn = (b, s, i = bv.act[s]) => b.teams[s][i];
+const nameIn = (b, s) => species(critterIn(b, s).s).name;
+function syncView(b) { bv.hp = b.teams.map((t) => t.map((c) => c.hp)); bv.act = b.act.slice(); bv.faint = [0, 1].map((s) => b.teams[s][b.act[s]].hp <= 0); }
+function viewTick(b, now) {
+  if (bv.id !== b.id) { // a new battle (or I just arrived mid-battle: skip what already happened)
+    Object.assign(bv, { id: b.id, turn: b.turn, queue: b.turn === 1 ? b.log.slice() : [], cur: null, picked: null, switching: false, text: "", enter: [now, now], faintAt: [0, 0] });
+    $("over").hidden = true;
+    syncView(b); bv.shown = [0, 1].map((s) => critterIn(b, s).hp);
+    if (b.turn === 1) bv.hp = b.teams.map((t) => t.map((c) => c.max));
+  } else if (b.turn > bv.turn) { bv.queue.push(...b.log); bv.turn = b.turn; bv.picked = null; bv.switching = false; }
+  if (bv.cur && now - bv.at >= CONFIG.stepMs) bv.cur = null;
+  if (!bv.cur && bv.queue.length) { bv.cur = bv.queue.shift(); bv.at = now; playLine(b, bv.cur, now); }
+  if (!bv.cur && !bv.queue.length) syncView(b);
+  for (const s of [0, 1]) { const want = bv.hp[s][bv.act[s]] ?? 0; bv.shown[s] += (want - bv.shown[s]) * Math.min(1, 6 * (1 / 60)); }
+  // my pick: re-sent every 2.5s until the turn resolves (a new host gets it too)
+  const side = mySideOf(b);
+  if (side >= 0 && b.phase === "pick" && bv.picked !== null && performance.now() > bv.resendAt) sendPick(b, bv.picked);
+  if (ATTRACT && side >= 0 && b.phase === "pick" && bv.picked === null && !bv.cur && !bv.queue.length && now - bv.at > 300) pickMove(botPick(b.teams, b.act, side));
+}
+function playLine(b, e, now) {
+  const side = mySideOf(b), who = (s) => (s === side ? "Your" : `${b.sides[s].n}'s`);
+  if (e.k === "start") bv.text = side >= 0 ? `${b.sides[1 - side].n} wants to battle!` : `${b.sides[0].n} vs ${b.sides[1].n}!`;
+  if (e.k === "use") { bv.text = `${who(e.s)} ${nameIn(b, e.s)} used ${CONFIG.moves[e.m].name}!`; bv.lunge[e.s] = now; sound(420, 0.06); }
+  if (e.k === "hit") {
+    bv.hp[e.s][bv.act[e.s]] = e.hp; bv.flash[e.s] = now;
+    bv.text = e.c ? "A critical hit!" : e.e > 1 ? "It's super effective!" : e.e < 1 ? "It's not very effective…" : bv.text;
+    hitFx(b, e, now); sound(e.e > 1 ? 160 : 220, 0.12, 0.25);
+  }
+  if (e.k === "miss") bv.text = "It missed!";
+  if (e.k === "heal") { bv.hp[e.s][bv.act[e.s]] = e.hp; bv.text = `${nameIn(b, e.s)} rested and healed!`; sparkleFx(b, e.s, "#7dffb0", now); }
+  if (e.k === "buff") { bv.text = `${nameIn(b, e.s)} is focused! Its next hits are stronger.`; sparkleFx(b, e.s, "#ffb347", now); }
+  if (e.k === "faint") { bv.faint[e.s] = true; bv.faintAt[e.s] = now; bv.text = `${who(e.s)} ${nameIn(b, e.s)} fainted!`; sound(120, 0.4, 0.25); }
+  if (e.k === "send") { bv.act[e.s] = e.i; bv.faint[e.s] = false; bv.enter[e.s] = now; bv.text = e.s === side ? `Go, ${nameIn(b, e.s)}!` : `${b.sides[e.s].n} sends out ${nameIn(b, e.s)}!`; }
+  if (e.k === "flee") bv.text = `${b.sides[e.s].n} left the battle.`;
+  if (e.k === "end") bv.text = e.w === -2 ? "It's a draw!" : e.w === side ? "You win!" : `${b.sides[e.w].n} wins!`;
+}
+function sendPick(b, m) {
+  bv.resendAt = performance.now() + 2500;
+  const msg = { b: b.id, t: b.turn, m };
+  if (isHost()) applyMove(net.sessionId, msg); else net.send("move", msg);
+}
+function pickMove(m) {
+  const b = battle();
+  if (!b || b.phase !== "pick" || mySideOf(b) < 0 || bv.picked !== null || bv.cur || bv.queue.length) return;
+  bv.picked = m; sendPick(b, m); sound(600, 0.05);
+}
+/** The move buttons (or "waiting"), rebuilt only when what they show changes. */
+function drawMoves(b) {
+  const side = mySideOf(b), ready = b.phase === "pick" && !bv.cur && !bv.queue.length;
+  $("log").textContent = bv.text;
+  let key = "", html = "";
+  if (side >= 0 && ready && bv.picked === null) {
+    const c = critterIn(b, side), sp = species(c.s), others = b.teams[side].map((x, i) => ({ x, i })).filter(({ x, i }) => x.hp > 0 && i !== bv.act[side]);
+    key = `pick:${b.id}:${b.turn}:${bv.switching ? 1 : 0}`;
+    if (bv.switching) html = others.map(({ x, i }) => `<button data-m="s${i}" style="--t:${typeColor(species(x.s).type, 40)}">${esc(species(x.s).name)}<small>Lv ${x.lv} · ${x.hp}/${x.max} HP</small></button>`).join("") + `<button data-back="1">Back<small>to moves</small></button>`;
+    else html = sp.moves.map((k, i) => { const M = CONFIG.moves[k]; return `<button data-m="${i}" style="--t:${typeColor(M.type, 40)}">${M.name}<small>${M.power ? `${M.type ? CONFIG.types[M.type].name : "Normal"} · ${M.power} power${M.acc < 100 ? ` · ${M.acc}%` : ""}` : M.heal ? "Heal 40%" : "Next hits +50%"}</small></button>`; }).join("")
+      + (others.length ? `<button data-switch="1">Switch<small>${others.length} ready</small></button>` : `<button disabled style="opacity:.4">Switch<small>no one left</small></button>`);
+  } else if (side >= 0 && ready) { key = "wait"; html = `<button class="wait" disabled>Waiting for ${esc(b.sides[1 - side].n)}…</button>`; }
+  else { key = "watch"; html = ""; }
+  if (b.phase === "pick" && ready && side >= 0) $("log").textContent = bv.picked === null ? `What will ${nameIn(b, side)} do? (${Math.max(0, Math.ceil((b.endsAt - Date.now()) / 1000))}s)` : bv.text;
+  if (key !== bv.movesKey) { bv.movesKey = key; $("moves").innerHTML = html; }
+}
+$("moves").addEventListener("click", (e) => {
+  const btn = e.target.closest("button");
+  if (!btn || btn.disabled) return;
+  if (btn.dataset.switch) { bv.switching = true; return; }
+  if (btn.dataset.back) { bv.switching = false; return; }
+  const m = btn.dataset.m; bv.switching = false;
+  pickMove(m[0] === "s" ? m : +m);
+});
+// Battle effects (in screen pixels).
+const bfx = [];
+function sideSpot(b, s) {
+  const side = mySideOf(b), near = s === (side >= 0 ? side : 0), sceneH = H - panelH();
+  return near ? { x: W * 0.3, y: sceneH * 0.76, R: Math.min(W * 0.16, sceneH * 0.16) * 1.1, face: 1 } : { x: W * 0.7, y: sceneH * 0.42, R: Math.min(W * 0.16, sceneH * 0.16) * 0.9, face: -1 };
+}
+function hitFx(b, e, now) {
+  const p = sideSpot(b, e.s), col = e.t ? typeColor(e.t, 60) : "#ffffff";
+  for (let i = 0; i < 22; i++) { const a = Math.random() * Math.PI * 2, v = 80 + Math.random() * 260; bfx.push({ x: p.x, y: p.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 60, life: 0.5 + Math.random() * 0.3, col }); }
+  bfx.push({ text: String(e.n), x: p.x + p.R * 0.6, y: p.y - p.R, vy: -60, life: 0.9, col: e.e > 1 ? "#ffd166" : "#fff", big: e.c || e.e > 1 });
+}
+function sparkleFx(b, s, col, now) { const p = sideSpot(b, s); for (let i = 0; i < 16; i++) bfx.push({ x: p.x + (Math.random() - 0.5) * p.R * 1.6, y: p.y + p.R * 0.4, vx: 0, vy: -60 - Math.random() * 90, life: 0.8, col, plus: true }); }
+const panelH = () => { const p = document.getElementById("bpanel"); return p.hidden ? 0 : p.offsetHeight; };
+function drawBattle(b, now, dt) {
+  const side = mySideOf(b), near = side >= 0 ? side : 0, sceneH = H - panelH(), t = now / 1000;
+  const sky = ctx.createLinearGradient(0, 0, 0, sceneH); sky.addColorStop(0, "#7cc8ff"); sky.addColorStop(0.55, "#d8f1ff"); sky.addColorStop(0.56, "#8fd27a"); sky.addColorStop(1, "#5aa64c");
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "#ffffffcc"; for (const [cx, cy, s] of [[0.15, 0.12, 1], [0.55, 0.08, 0.8], [0.85, 0.18, 1.1]]) { const x = ((cx * W + t * 12 * s) % (W + 200)) - 100; ctx.beginPath(); ctx.ellipse(x, cy * sceneH, 60 * s, 18 * s, 0, 0, Math.PI * 2); ctx.ellipse(x + 30 * s, cy * sceneH - 10 * s, 40 * s, 16 * s, 0, 0, Math.PI * 2); ctx.fill(); }
+  for (const s of [1 - near, near]) {
+    const p = sideSpot(b, s), c = critterIn(b, s), sp = species(c.s);
+    ctx.fillStyle = "#4c8f3fcc"; ctx.beginPath(); ctx.ellipse(p.x, p.y + p.R * 0.62, p.R * 1.5, p.R * 0.42, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#6dbb58"; ctx.beginPath(); ctx.ellipse(p.x, p.y + p.R * 0.55, p.R * 1.35, p.R * 0.34, 0, 0, Math.PI * 2); ctx.fill();
+    const lunge = Math.max(0, 1 - (now - bv.lunge[s]) / 260), flash = now - bv.flash[s] < 220 && Math.floor((now - bv.flash[s]) / 55) % 2 === 0;
+    const enter = Math.min(1, (now - bv.enter[s]) / 350), gone = bv.faint[s] ? Math.min(1, (now - bv.faintAt[s]) / CONFIG.stepMs) : 0;
+    const dx = Math.sin(lunge * Math.PI) * p.R * 0.6 * p.face, shake = now - bv.flash[s] < 260 ? (Math.random() - 0.5) * 8 : 0;
+    if (gone < 1) drawCritter(ctx, sp, p.x + dx + shake, p.y + gone * p.R, p.R, { t, face: p.face, flash, alpha: 1 - gone, scale: 0.3 + 0.7 * enter });
+    drawHpBox(b, s, s === near);
+  }
+  if (ATTRACT && bv.text) { // the preview has no move panel: show the line on the scene
+    ctx.font = "900 22px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.lineWidth = 6; ctx.strokeStyle = "#000b";
+    ctx.strokeText(bv.text, W / 2, H - 22, W - 24); ctx.fillStyle = "#fff"; ctx.fillText(bv.text, W / 2, H - 22, W - 24);
+  }
+  for (let i = bfx.length - 1; i >= 0; i--) {
+    const f = bfx[i]; f.life -= dt; if (f.life <= 0) { bfx.splice(i, 1); continue; }
+    f.x += (f.vx || 0) * dt; f.y += f.vy * dt; if (!f.text && !f.plus) f.vy += 400 * dt;
+    ctx.globalAlpha = Math.min(1, f.life * 2.5);
+    if (f.text) { ctx.font = `900 ${f.big ? 34 : 26}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.lineWidth = 5; ctx.strokeStyle = "#000a"; ctx.strokeText(f.text, f.x, f.y); ctx.fillStyle = f.col; ctx.fillText(f.text, f.x, f.y); }
+    else if (f.plus) { ctx.fillStyle = f.col; ctx.font = "900 18px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.fillText("+", f.x, f.y); }
+    else { ctx.fillStyle = f.col; ctx.fillRect(f.x - 3, f.y - 3, 6, 6); }
+  }
+  ctx.globalAlpha = 1;
+}
+/** Name, level, type and a health bar for the critter out front on one side. */
+function drawHpBox(b, s, near) {
+  const c = critterIn(b, s), sp = species(c.s), sceneH = H - panelH(), w = Math.min(230, W * 0.5), h = 58;
+  const x = near ? W - w - 14 : 14, y = near ? sceneH - h - 14 : Math.max(14, sceneH * 0.1);
+  ctx.fillStyle = "#1c2238e8"; rr(x, y, w, h, 12); ctx.fill(); ctx.strokeStyle = b.sides[s].c; ctx.lineWidth = 3; ctx.stroke();
+  ctx.fillStyle = "#fff"; ctx.font = "800 15px system-ui, sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  ctx.fillText(sp.name, x + 12, y + 21);
+  ctx.font = "700 12px system-ui, sans-serif"; ctx.textAlign = "right"; ctx.fillText(`Lv ${c.lv}`, x + w - 12, y + 20);
+  const lvW = ctx.measureText(`Lv ${c.lv}`).width;
+  ctx.fillStyle = typeColor(sp.type, 48); rr(x + w - 66 - lvW, y + 8, 46, 16, 8); ctx.fill();
+  ctx.fillStyle = "#fff"; ctx.font = "800 10px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.fillText(CONFIG.types[sp.type].name.toUpperCase(), x + w - 43 - lvW, y + 20);
+  const f = Math.max(0, bv.shown[s] / c.max), bw = w - 24;
+  ctx.fillStyle = "#0008"; rr(x + 12, y + 32, bw, 10, 5); ctx.fill();
+  ctx.fillStyle = f > 0.5 ? "#4ade80" : f > 0.2 ? "#facc15" : "#f87171"; rr(x + 12, y + 32, Math.max(0, bw * f), 10, 5); ctx.fill();
+  ctx.fillStyle = "#ffffffcc"; ctx.font = "700 10px system-ui, sans-serif"; ctx.textAlign = "left";
+  ctx.fillText(`${b.sides[s].n} · ${b.teams[s].filter((x) => x.hp > 0).length}/${b.teams[s].length} left${near ? ` · ${Math.max(0, Math.round(bv.shown[s]))}/${c.max} HP` : ""}`, x + 12, y + 53);
+}
+/** The battle is over and the last line has played: give my team its XP (once) and show the result. */
+function battleOver(b) {
+  const side = mySideOf(b);
+  if (side < 0 || bv.xpFor === b.id) return;
+  bv.xpFor = b.id;
+  const won = b.winner === side, foeLv = b.teams[1 - side].reduce((n, c) => n + c.lv, 0) / b.teams[1 - side].length, gain = Math.round(won ? 6 + foeLv * 2 : 2 + foeLv), ups = [];
+  for (const f of b.teams[side]) {
+    const c = save.team.find((x) => x.s === f.s);
+    if (!c) continue;
+    c.xp += gain;
+    while (c.xp >= xpNeed(c.lv) && c.lv < 50) { c.xp -= xpNeed(c.lv); c.lv++; ups.push(`${species(c.s).name} grew to Lv ${c.lv}!`); }
+  }
+  if (won) save.wins++;
+  writeSave();
+  if (ATTRACT) return;
+  $("overTitle").textContent = b.winner === -2 ? "Draw" : won ? "You win!" : `${b.sides[1 - side].n} wins`;
+  $("overSub").textContent = `+${gain} XP for your team. ${ups.join(" ")}`;
+  $("over").hidden = false; sound(won ? 660 : 180, 0.4, 0.3);
+  const list = $("board");
+  if (!board) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
+  list.innerHTML = "<li>Loading…</li>";
+  (won ? board.submit(1, "inc").catch(() => null) : Promise.resolve()).then(() => board.top(10)).then(({ entries }) => {
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score}</span></li>`).join("") : "<li>No wins yet. Be the first.</li>";
+  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+}
+$("back").onclick = () => { $("over").hidden = true; };
+
+// ── DRAW ────────────────────────────────────────────────────────────────────────────
+const cv = document.getElementById("game"), ctx = cv.getContext("2d"), fieldCv = document.createElement("canvas");
+let W = 0, H = 0, DPR = 1;
+function fit() { DPR = Math.min(2, devicePixelRatio || 1); W = innerWidth; H = innerHeight; cv.width = W * DPR; cv.height = H * DPR; }
+addEventListener("resize", fit); addEventListener("orientationchange", fit); fit();
+function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h); }
+/** The field, painted once at twice its size: grass, tall grass, paths, water, flowers, then trees. */
+function paintField() {
+  fieldCv.width = FW * T * 2; fieldCv.height = FH * T * 2;
+  const c = fieldCv.getContext("2d"), r = mulberry32(99);
+  c.scale(2, 2);
+  FIELD.forEach((row, y) => row.forEach((ch, x) => {
+    const X = x * T, Y = y * T, water = (dx, dy) => FIELD[y + dy]?.[x + dx] === "~";
+    c.fillStyle = (x + y) % 2 ? "#79c962" : "#73c25c"; c.fillRect(X, Y, T, T);
+    if (ch === "." && r() < 0.5) { c.strokeStyle = "#5fae4c"; c.lineWidth = 1.5; const gx = X + 6 + r() * 20, gy = Y + 10 + r() * 16; c.beginPath(); c.moveTo(gx, gy); c.lineTo(gx - 2, gy - 5); c.moveTo(gx + 3, gy); c.lineTo(gx + 4, gy - 5); c.stroke(); }
+    if (ch === "=") { c.fillStyle = "#e3cf98"; c.fillRect(X, Y, T, T); c.fillStyle = "#cdb57a"; for (let k = 0; k < 3; k++) c.fillRect(X + r() * 28, Y + r() * 28, 3, 3); }
+    if (ch === ",") {
+      c.fillStyle = "#3f9b4a"; c.fillRect(X, Y, T, T);
+      for (let k = 0; k < 7; k++) { const bx = X + 3 + (k % 4) * 8 + r() * 3, by = Y + 8 + Math.floor(k / 4) * 14 + r() * 3; c.strokeStyle = k % 2 ? "#2e7f3a" : "#5cbc5f"; c.lineWidth = 2; c.beginPath(); c.moveTo(bx - 3, by - 7); c.lineTo(bx, by + 4); c.lineTo(bx + 3, by - 7); c.stroke(); }
+    }
+    if (ch === "~") {
+      c.fillStyle = "#4aa8e0"; c.fillRect(X, Y, T, T); c.fillStyle = "#8fd4f5";
+      if (!water(0, -1)) c.fillRect(X, Y, T, 4); if (!water(0, 1)) c.fillRect(X, Y + T - 4, T, 4); if (!water(-1, 0)) c.fillRect(X, Y, 4, T); if (!water(1, 0)) c.fillRect(X + T - 4, Y, 4, T);
+    }
+    if (ch === "*") for (let k = 0; k < 3; k++) { c.fillStyle = ["#ffffff", "#ffd166", "#ff8fb1", "#b69cff"][Math.floor(r() * 4)]; const fx = X + 5 + r() * 22, fy = Y + 5 + r() * 22; c.beginPath(); c.arc(fx, fy, 3, 0, Math.PI * 2); c.fill(); c.fillStyle = "#fff6"; c.beginPath(); c.arc(fx, fy, 1.2, 0, Math.PI * 2); c.fill(); }
+  }));
+  FIELD.forEach((row, y) => row.forEach((ch, x) => {
+    if (ch !== "T") return;
+    const X = x * T + T / 2, Y = y * T + T / 2;
+    c.fillStyle = "#0003"; c.beginPath(); c.ellipse(X + 3, Y + 11, 14, 6, 0, 0, Math.PI * 2); c.fill();
+    c.fillStyle = "#7a5230"; c.fillRect(X - 3, Y, 6, 12);
+    c.fillStyle = "#2f8a46"; c.beginPath(); c.arc(X, Y - 4, 15, 0, Math.PI * 2); c.fill();
+    c.fillStyle = "#3fa65a"; c.beginPath(); c.arc(X - 4, Y - 8, 9, 0, Math.PI * 2); c.fill();
+  }));
+}
+const cam = { x: SPAWN.x, y: SPAWN.y, z: 1 };
+/** The camera follows me and stops at the field's edges. Screen ↔ world always goes through it. */
+function placeCamera() {
+  cam.z = Math.max(1, Math.min(2.6, Math.min(W, H) / (T * (ATTRACT ? 7.5 : 9.5))));
+  const hw = W / 2 / cam.z, hh = H / 2 / cam.z, fw = FW * T, fh = FH * T;
+  cam.x = fw < hw * 2 ? fw / 2 : Math.max(hw, Math.min(fw - hw, me.x));
+  cam.y = fh < hh * 2 ? fh / 2 : Math.max(hh, Math.min(fh - hh, me.y));
+}
+const toWorld = (X, Y) => ({ x: cam.x + (X - W / 2) / cam.z, y: cam.y + (Y - H / 2) / cam.z });
+const views = new Map(); // eased positions of everything I don't move myself
+function eased(id, x, y, dt) { let v = views.get(id); if (!v) { v = { x, y }; views.set(id, v); } const k = 1 - Math.pow(0.0006, dt); v.x += (x - v.x) * k; v.y += (y - v.y) * k; return v; }
+function drawTamer(x, y, color, name, f, moving, t, mine, badge) {
+  const step = moving ? Math.sin(t * 14) * 3 : 0;
+  ctx.fillStyle = "#0004"; ctx.beginPath(); ctx.ellipse(x, y + 12, 9, 3.5, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#33384d"; ctx.fillRect(x - 5, y + 3 + Math.max(0, step) * 0.5, 4, 9 - Math.max(0, step)); ctx.fillRect(x + 1, y + 3 + Math.max(0, -step) * 0.5, 4, 9 - Math.max(0, -step));
+  ctx.fillStyle = color; rr(x - 7, y - 6, 14, 12, 4); ctx.fill();
+  ctx.fillStyle = "#ffd7b3"; ctx.beginPath(); ctx.arc(x, y - 11, 7, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x, y - 13, 7.3, Math.PI, 0); ctx.fill(); ctx.fillRect(x + (f > 0 ? 0 : -10), y - 14, 10, 3);
+  ctx.fillStyle = "#1a1726"; ctx.fillRect(x + f * 3 - 1, y - 11, 2, 2.5);
+  ctx.font = "800 9px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+  ctx.lineWidth = 3; ctx.strokeStyle = "#0009"; ctx.strokeText(name, x, y - 23); ctx.fillStyle = mine ? "#ffe08a" : "#fff"; ctx.fillText(name, x, y - 23);
+  if (badge) { ctx.fillStyle = "#fff"; rr(x - ctx.measureText(badge).width / 2 - 6, y - 46, ctx.measureText(badge).width + 12, 15, 7); ctx.fill(); ctx.fillStyle = "#1a1726"; ctx.fillText(badge, x, y - 35); }
+}
+function drawField(now, dt) {
+  placeCamera();
+  const t = now / 1000;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = "#2f6b3a"; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.setTransform(DPR * cam.z, 0, 0, DPR * cam.z, DPR * (W / 2 - cam.x * cam.z), DPR * (H / 2 - cam.y * cam.z));
+  ctx.drawImage(fieldCv, 0, 0, FW * T, FH * T);
+  // water shimmer
+  ctx.strokeStyle = "#ffffff55"; ctx.lineWidth = 1.5;
+  FIELD.forEach((row, y) => row.forEach((ch, x) => { if (ch === "~" && (x + y) % 3 === 0) { const o = Math.sin(t * 2 + x) * 4; ctx.beginPath(); ctx.moveTo(x * T + 8 + o, y * T + 14); ctx.lineTo(x * T + 18 + o, y * T + 14); ctx.stroke(); } }));
+  const things = [];
+  for (const w of wildList()) { const v = isHost() ? w : eased("w" + w.i, w.x, w.y, dt); things.push({ y: v.y, draw: () => drawWild(w, v, t) }); }
+  const b = battle(), r = rivalNow();
+  if (r && r.on) { const v = isHost() ? r : eased("rival", r.x, r.y, dt); things.push({ y: v.y, draw: () => drawTamer(v.x, v.y, RIVAL_COLOR, CONFIG.rival, r.f, r.m, t, false, inBattle("bot") ? "⚔" : r.say) }); }
+  for (const id of livePlayers()) {
+    if (id === net.sessionId) continue;
+    const p = posOf(id); if (!p) continue;
+    const v = eased(id, p.x, p.y, dt), pl = S.entities.players[id];
+    things.push({ y: v.y, draw: () => drawTamer(v.x, v.y, pl.c || COLORS[1], pl.n || "Tamer", p.f || 1, p.m, t, false, inBattle(id) ? "⚔" : holding(id) ? "Catching…" : "") });
+  }
+  things.push({ y: me.y, draw: () => drawTamer(me.x, me.y, myColor, myName, me.f, me.m, t, true, "") });
+  things.sort((p, q) => p.y - q.y).forEach((x) => x.draw());
+  if (me.goal) { ctx.strokeStyle = "#fff8"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(me.goal.x, me.goal.y, 6 + Math.sin(t * 8) * 2, 0, Math.PI * 2); ctx.stroke(); }
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  drawTeamBar(now);
+  drawStick();
+}
+function drawWild(w, v, t) {
+  const sp = species(w.s), inGrass = tileAt(v.x, v.y) === ",", R = 12 + Math.min(4, w.lv * 0.4);
+  if (w.h) { ctx.strokeStyle = "#ffffffaa"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(v.x, v.y, R * 1.6 + Math.sin(t * 6) * 2, 0, Math.PI * 2); ctx.stroke(); }
+  drawCritter(ctx, sp, v.x, v.y - 2, R, { t, face: w.f || 1 });
+  if (inGrass) { // grass blades in front of its feet
+    ctx.strokeStyle = "#2e7f3a"; ctx.lineWidth = 2;
+    for (let k = -2; k <= 2; k++) { const bx = v.x + k * 5; ctx.beginPath(); ctx.moveTo(bx - 3, v.y + 2); ctx.lineTo(bx, v.y + R * 0.7); ctx.lineTo(bx + 3, v.y + 2); ctx.stroke(); }
+  }
+  ctx.font = "800 8px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.fillStyle = "#fff"; ctx.lineWidth = 3; ctx.strokeStyle = "#0008";
+  ctx.strokeText(`Lv ${w.lv}`, v.x, v.y - R - 6); ctx.fillText(`Lv ${w.lv}`, v.x, v.y - R - 6);
+}
+// My team along the bottom: the first three (gold ring) battle. Tap one to bring it to the front.
+let teamSlots = [];
+function drawTeamBar(now) {
+  if (ATTRACT) return;
+  const n = save.team.length, size = Math.min(54, (W - 24) / 6 - 6), y = H - size - 22 - (document.getElementById("safe")?.offsetHeight || 0);
+  teamSlots = save.team.map((c, i) => ({ x: 12 + i * (size + 6), y, w: size, h: size, i }));
+  for (const s of teamSlots) {
+    const c = save.team[s.i], sp = species(c.s);
+    ctx.fillStyle = "#1c2238cc"; rr(s.x, s.y, s.w, s.h, 12); ctx.fill();
+    if (s.i < CONFIG.battleSize) { ctx.strokeStyle = "#ffd166"; ctx.lineWidth = 2; ctx.stroke(); }
+    drawCritter(ctx, sp, s.x + s.w / 2, s.y + s.h * 0.48, s.w * 0.3, { t: now / 1000 });
+    ctx.font = "800 10px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.fillStyle = "#fff"; ctx.fillText(`Lv ${c.lv}`, s.x + s.w / 2, s.y + s.h - 4);
+    ctx.fillStyle = typeColor(sp.type, 55); ctx.beginPath(); ctx.arc(s.x + 8, s.y + 8, 4, 0, Math.PI * 2); ctx.fill();
+  }
+  if (!n) { ctx.font = "700 13px system-ui, sans-serif"; ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.fillText("Your team is empty", 14, y + 30); }
+}
+/** The catching game, over the field. */
+function drawCatch(now) {
+  const c = catching, sp = species(c.w.s), cx = W / 2, cy = H * 0.45, R = Math.min(W, H) * 0.13;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = "#0b1a10cc"; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "#3f9b4a"; ctx.beginPath(); ctx.ellipse(cx, cy + R * 0.8, R * 2, R * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+  const inOrb = c.phase === "shake" || (c.phase === "done") || (c.phase === "throw" && now - c.at > 380);
+  if (!inOrb) drawCritter(ctx, sp, cx, cy, R, { t: now / 1000, face: -1, alpha: c.phase === "fled" ? Math.max(0, 1 - (now - c.at) / 600) : 1 });
+  if (c.phase === "aim") {
+    const r = ringAt(c, now), target = R * 1.25, ring = target * (r / 0.3), good = Math.abs(r - 0.3) < 0.07;
+    ctx.setLineDash([8, 6]); ctx.strokeStyle = "#4ade80"; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(cx, cy, target, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle = good ? "#4ade80" : Math.abs(r - 0.3) < 0.2 ? "#facc15" : "#f87171"; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(cx, cy, ring, 0, Math.PI * 2); ctx.stroke();
+  }
+  // the orb: flies in, then shakes on the ground
+  let ox = cx, oy = cy + R * 0.55, rot = 0;
+  if (c.phase === "throw") { const p = Math.min(1, (now - c.at) / 450); ox = cx; oy = H - 40 + (cy - H + 40) * p - Math.sin(p * Math.PI) * R * 1.5; rot = p * 8; }
+  if (c.phase === "shake") { const k = (now - c.at) / CONFIG.shakeMs; rot = Math.sin(k * Math.PI * 2) * 0.35 * (k % 1 < 0.6 ? 1 : 0); }
+  if (c.phase !== "aim" && c.phase !== "fled") {
+    ctx.save(); ctx.translate(ox, oy); ctx.rotate(rot);
+    const o = R * 0.32;
+    ctx.fillStyle = "#2fd4d4"; ctx.beginPath(); ctx.arc(0, 0, o, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = "#f4f4f8"; ctx.beginPath(); ctx.arc(0, 0, o, 0, Math.PI); ctx.fill();
+    ctx.fillStyle = "#1a1726"; ctx.fillRect(-o, -o * 0.1, o * 2, o * 0.2); ctx.beginPath(); ctx.arc(0, 0, o * 0.3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(0, 0, o * 0.18, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  ctx.font = "900 22px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.lineWidth = 5; ctx.strokeStyle = "#000a";
+  const title = `Wild ${sp.name} · Lv ${c.w.lv}`;
+  ctx.strokeText(title, cx, cy - R * 1.9); ctx.fillStyle = typeColor(sp.type, 70); ctx.fillText(title, cx, cy - R * 1.9);
+  ctx.font = "800 16px system-ui, sans-serif"; ctx.strokeText(c.text, cx, cy + R * 1.9, W - 32); ctx.fillStyle = "#fff"; ctx.fillText(c.text, cx, cy + R * 1.9, W - 32);
+  if (c.phase === "aim") { ctx.font = "700 13px system-ui, sans-serif"; ctx.fillStyle = "#ffffffaa"; ctx.fillText(`${CONFIG.catchTries - c.tries} throw${CONFIG.catchTries - c.tries === 1 ? "" : "s"} left · tap or press Space`, cx, cy + R * 1.9 + 24); }
+  for (let i = sparks.length - 1; i >= 0; i--) { const p = sparks[i]; p.life -= 1 / 60; p.x += p.vx / 60; p.y += p.vy / 60; p.vy += 6; if (p.life <= 0) { sparks.splice(i, 1); continue; } ctx.globalAlpha = Math.min(1, p.life * 2); ctx.fillStyle = p.col; ctx.fillRect(p.x - 3, p.y - 3, 6, 6); }
+  ctx.globalAlpha = 1;
+}
+const sparks = [];
+function burstScreen(n) { for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, v = 120 + Math.random() * 280; sparks.push({ x: W / 2, y: H * 0.45, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 120, life: 0.9, col: ["#ffd166", "#ffffff", "#2fd4d4", "#ff8fb1"][i % 4] }); } }
+let actx = null, lastSound = 0; // sounds start after the first tap (browsers require it)
+function sound(freq, len, vol = 0.15) {
+  const now = performance.now();
+  if (!actx || ATTRACT || now - lastSound < 50) return;
+  lastSound = now;
+  const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
+  o.type = "triangle"; o.frequency.setValueAtTime(freq, t); o.frequency.exponentialRampToValueAtTime(Math.max(40, freq * 1.4), t + len);
+  g.gain.setValueAtTime(vol * 0.5, t); g.gain.exponentialRampToValueAtTime(0.001, t + len + 0.05);
+  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len + 0.08);
+}
+
+// ── HUD & INPUT ─────────────────────────────────────────────────────────────────────
+let dropped = false, toastUntil = 0;
+function toast(text) { $("toast").textContent = text; $("toast").style.opacity = 1; toastUntil = performance.now() + 2200; }
+function hud(now) {
+  const b = battle(), mine = busyBattle(b) && mySideOf(b) >= 0, foe = opponent(), foeBusy = foe && foe !== "bot" && (inBattle(foe) || holding(foe));
+  $("bpanel").hidden = !mine || ATTRACT;
+  $("fight").hidden = mine || ATTRACT || !!catching || !foe;
+  if (foe) { $("fight").textContent = foeBusy ? `${nameOf(foe)} is busy` : `Battle ${nameOf(foe)}`; $("fight").disabled = foeBusy || !battleTeam().length || busyBattle(b); }
+  $("hint").style.opacity = !hintOff && !mine && !ATTRACT && now < 25000 ? 1 : 0;
+  if (now > toastUntil) $("toast").style.opacity = 0;
+  const n = livePlayers().length;
+  $("net").textContent = ATTRACT ? "" : net.offline ? "Offline: playing with bots" : dropped ? "Reconnecting…" : `Online · ${n} player${n === 1 ? "" : "s"}${isHost() ? " · you run the field" : ""}`;
+}
+$("fight").onclick = () => { challenge(opponent()); hintOff = true; };
+const keys = new Set(), stick = { id: null, x: 0, y: 0, t: 0, moved: false };
+function readKeys() {
+  if (stick.id !== null) return;
+  input.x = (keys.has("d") || keys.has("arrowright") ? 1 : 0) - (keys.has("a") || keys.has("arrowleft") ? 1 : 0);
+  input.y = (keys.has("s") || keys.has("arrowdown") ? 1 : 0) - (keys.has("w") || keys.has("arrowup") ? 1 : 0);
+  if (input.x || input.y) me.goal = null;
+}
+addEventListener("keydown", (e) => {
+  const k = e.key.toLowerCase(); keys.add(k);
+  if (k === " " || k.startsWith("arrow")) e.preventDefault();
+  if (k === " " && catching) throwOrb(performance.now());
+  const b = battle(), i = "123".indexOf(k);
+  if (i >= 0 && busyBattle(b) && mySideOf(b) >= 0) pickMove(i);
+});
+addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
+addEventListener("blur", () => keys.clear());
+// Pointer: during catching any tap throws. On the field, a tap walks there and a drag is a thumb stick.
+cv.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  if (!actx) try { actx = new AudioContext(); } catch {}
+  if (catching) { throwOrb(performance.now()); return; }
+  if (busyBattle(battle()) && mySideOf(battle()) >= 0) return;
+  const slot = teamSlots.find((s) => e.clientX >= s.x && e.clientX <= s.x + s.w && e.clientY >= s.y && e.clientY <= s.y + s.h);
+  if (slot) { const [c] = save.team.splice(slot.i, 1); save.team.unshift(c); writeSave(); const sp = species(c.s), st = stats(c); toast(`${sp.name} · ${CONFIG.types[sp.type].name} · Lv ${c.lv} · ${st.hp} HP · leads your team`); return; }
+  Object.assign(stick, { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), moved: false });
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener("pointermove", (e) => {
+  if (e.pointerId !== stick.id) return;
+  const dx = e.clientX - stick.x, dy = e.clientY - stick.y, d = Math.hypot(dx, dy);
+  if (d > 12) stick.moved = true;
+  if (stick.moved) { input.x = dx / Math.max(d, 44); input.y = dy / Math.max(d, 44); me.goal = null; }
+});
+for (const ev of ["pointerup", "pointercancel"]) cv.addEventListener(ev, (e) => {
+  if (e.pointerId !== stick.id) return;
+  if (!stick.moved && ev === "pointerup") me.goal = toWorld(e.clientX, e.clientY); // a tap: walk there
+  stick.id = null; input.x = input.y = 0;
+});
+function drawStick() { if (stick.id === null || !stick.moved) return; ctx.strokeStyle = "#ffffff66"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(stick.x, stick.y, 44, 0, Math.PI * 2); ctx.stroke(); ctx.fillStyle = "#ffffff55"; ctx.beginPath(); ctx.arc(stick.x + input.x * 44, stick.y + input.y * 44, 18, 0, Math.PI * 2); ctx.fill(); }
+document.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
+
+// ── MAIN LOOP ───────────────────────────────────────────────────────────────────────
+let last = performance.now(), lastHb = 0, lastHud = 0;
+try { myName = localStorage.getItem("mpa-name") || ""; } catch {}
+const pickOne = (list) => list[Math.floor(Math.random() * list.length)];
+if (!myName) { myName = pickOne(NAME_A) + " " + pickOne(NAME_B); try { localStorage.setItem("mpa-name", myName); } catch {} }
+if (ATTRACT) Object.assign(CONFIG, { stepMs: 620, resultMs: 1500, turnMs: 4000, shakeMs: 300, caughtMs: 800 });
+/** Two players picked the same color at once (the room can look empty as you join): the later sessionId picks again. */
+function fixColor() {
+  const others = Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId);
+  if (!others.some(([id, p]) => id < net.sessionId && p.c === myColor) && myColor !== RIVAL_COLOR) return;
+  const used = new Set(others.map(([, p]) => p.c)), free = COLORS.find((c) => !used.has(c));
+  if (free && free !== myColor) { myColor = free; net.me.set("c", myColor); }
+}
+function frame(now) {
+  const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now;
+  if (now - lastHb > 1000) { lastHb = now; net.me.set("hb", Date.now()); fixColor(); }
+  readKeys();
+  if (isHost()) hostTick(dt, now); else { host.wasHost = false; host.last = null; }
+  const b = battle(), mine = busyBattle(b) && mySideOf(b) >= 0;
+  catchTick(now);
+  myTick(dt, now);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (mine || (b && bv.id === b.id && mySideOf(b) >= 0 && (bv.cur || bv.queue.length))) {
+    $("bpanel").hidden = ATTRACT;
+    viewTick(b, now); drawBattle(b, now, dt); drawMoves(b);
+    if (b.phase !== "pick" && !bv.cur && !bv.queue.length) battleOver(b);
+  } else { drawField(now, dt); if (catching) drawCatch(now); }
+  if (now - lastHud > 100) { lastHud = now; hud(now); }
+  requestAnimationFrame(frame);
+}
+
+(async function start() {
+  paintField();
+  net = await connect();
+  net.onState((st) => { S = st; });
+  net.on("grab", (d, from) => { if (isHost()) applyGrab(from, d); });
+  net.on("caught", (d, from) => { if (isHost()) applyCaught(from, d); });
+  net.on("challenge", (d, from) => { if (isHost()) applyChallenge(from, d); });
+  net.on("move", (d, from) => { if (isHost()) applyMove(from, d); });
+  net.onDisconnect(() => { dropped = true; $("net").textContent = "Reconnecting…"; });
+  net.onReconnect(() => { dropped = false; });
+  if (!net.offline && typeof MP !== "undefined") { player = MP.auth({ key: MP_CONNECT.key, apiUrl: MP_CONNECT.apiUrl }); board = player.leaderboard(CONFIG.board); }
+  const taken = new Set(Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId).map(([, p]) => p.c));
+  myColor = COLORS.find((c) => !taken.has(c)) || pickOne(COLORS);
+  me.x += (Math.random() - 0.5) * T * 5; // don't stand exactly on another tamer
+  net.me.set({ n: myName, c: myColor, hb: Date.now() });
+  publishPos(true);
+  if (!ATTRACT) save = readLocal() || save;
+  if (!save.team.length) save.team.push({ s: newSeed(ATTRACT ? "leaf" : pickOne(["ember", "tide", "leaf"])), lv: ATTRACT ? 6 : 5, xp: 0 }); // everyone starts with one critter
+  writeSave();
+  if (!ATTRACT) loadCloud();
+  requestAnimationFrame(frame);
+})();
+</script>
+<div id="safe" style="position:fixed;bottom:0;height:0;padding-bottom:env(safe-area-inset-bottom);visibility:hidden"></div>
+</body>
+</html>
