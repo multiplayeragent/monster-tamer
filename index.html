@@ -31,6 +31,7 @@
   .box h2 { margin: 0 0 4px; font-size: 26px; } .box p { margin: 0 0 12px; opacity: .9; }
   .box h3 { margin: 6px 0 4px; font-size: 13px; color: #ffd166; text-align: left; }
   .box ol { text-align: left; margin: 0 0 12px; padding-left: 24px; font-size: 14px; min-height: 30px; } .box li span { float: right; }
+  .box li.note { list-style: none; margin-left: -24px; opacity: .8; } /* a message, not a ranked line */
   .box button { width: 100%; min-height: 48px; border: 0; border-radius: 12px; background: #ffd166; color: #2a1d00; font: 800 16px system-ui, sans-serif; cursor: pointer; }
 </style>
 <script src="https://cdn.multiplayeragent.com/sdk/mp.global.js"></script>
@@ -44,7 +45,7 @@
 <div id="net">Connecting…</div>
 <div id="over" hidden><div class="box">
   <h2 id="overTitle"></h2><p id="overSub"></p>
-  <h3>Most battles won</h3><ol id="board"><li>Loading…</li></ol>
+  <h3>Most battles won</h3><ol id="board"><li class="note">Loading…</li></ol>
   <button id="back">Back to the field</button>
 </div></div>
 <script>
@@ -224,6 +225,8 @@ function moveBody(e, dx, dy, r = 9) { const stuck = blocked(e.x, e.y, r); if (st
 const SPAWN = { x: ((FW >> 1) + 0.5) * T, y: ((FH >> 1) + 0.5) * T };
 const GRASS = []; FIELD.forEach((row, y) => row.forEach((c, x) => { if (c === ",") GRASS.push([x, y]); }));
 const WALKABLE = []; FIELD.forEach((row, y) => row.forEach((c, x) => { if (c !== "T" && c !== "~") WALKABLE.push([x, y]); }));
+/** The middle of the open tile nearest to (x, y): never inside a tree or the pond. */
+function openSpot(x, y) { const [tx, ty] = WALKABLE.reduce((a, b) => (Math.hypot((b[0] + 0.5) * T - x, (b[1] + 0.5) * T - y) < Math.hypot((a[0] + 0.5) * T - x, (a[1] + 0.5) * T - y) ? b : a)); return { x: (tx + 0.5) * T, y: (ty + 0.5) * T }; }
 
 // ── CRITTERS ────────────────────────────────────────────────────────────────────────
 // A critter is { s: seed, lv: level, xp }. Everything else (type, name, look, stats, moves) comes from the seed.
@@ -365,8 +368,8 @@ function adoptWorld() {
   host.wild = parse(S.shared.wild, []).map((w) => ({ ...w, tx: w.x, ty: w.y, wait: 1, hu: Date.now() + CONFIG.holdMs }));
   host.nextWild = Math.max(0, ...host.wild.map((w) => w.i)) + 1;
   host.respawn = [];
-  const rv = parse(S.shared.rival, null);
-  host.rival = rv ? { ...rv, tx: rv.x, ty: rv.y, wait: 1 } : { x: SPAWN.x + 3 * T, y: SPAWN.y + 2 * T, f: -1, m: 0, tx: SPAWN.x + 3 * T, ty: SPAWN.y + 2 * T, wait: 2, on: 1, say: "" };
+  const rv = parse(S.shared.rival, null), at = openSpot(SPAWN.x + 3 * T, SPAWN.y + 2 * T);
+  host.rival = rv ? { ...rv, tx: rv.x, ty: rv.y, wait: 1 } : { x: at.x, y: at.y, f: -1, m: 0, tx: at.x, ty: at.y, wait: 2, on: 1, say: "" };
 }
 function spawnWild(nearStart) {
   const avg = livePlayers().map((id) => (id === net.sessionId ? battleTeam() : parse(S.entities.players[id]?.team, []))).flat().reduce((a, c, i, all) => a + c.lv / all.length, 0);
@@ -411,9 +414,9 @@ function rivalTick(dt, now) {
     if (R.wait > 0) R.wait -= dt;
     else {
       const dx = R.tx - R.x, dy = R.ty - R.y, d = Math.hypot(dx, dy);
-      if (d < 3 || R.stuck > 1) {
-        const go = human && Math.random() < 0.35 ? [Math.floor(human.x / T) + (Math.random() < 0.5 ? -2 : 2), Math.floor(human.y / T)] : WALKABLE[Math.floor(Math.random() * WALKABLE.length)];
-        R.tx = (go[0] + 0.5) * T; R.ty = (go[1] + 0.5) * T; R.wait = 0.8 + Math.random() * 2.5; R.stuck = 0;
+      if (d < 3 || R.stuck > 0.4) { // arrived, or walked into a tree or the pond: pick somewhere new
+        const go = human && Math.random() < 0.35 ? openSpot(human.x + (Math.random() < 0.5 ? -2 : 2) * T, human.y) : openSpot(...WALKABLE[Math.floor(Math.random() * WALKABLE.length)].map((v) => (v + 0.5) * T));
+        R.tx = go.x; R.ty = go.y; R.wait = R.stuck ? 0.3 : 0.8 + Math.random() * 2.5; R.stuck = 0;
       } else {
         const bx = R.x, by = R.y, step = Math.min(d, CONFIG.speed * 0.6 * dt);
         moveBody(R, (dx / d) * step, (dy / d) * step); R.m = 1; R.f = dx >= 0 ? 1 : -1;
@@ -462,9 +465,12 @@ function applyMove(from, d) {
   const key = b.id + ":" + b.turn, picks = host.picks.get(key) || [null, null];
   picks[side] = d.m; host.picks.set(key, picks);
 }
-/** The bot's pick (and anyone's whose time ran out): the strongest-looking move, with some luck. */
-function botPick(teams, act, side) {
+/** The bot's pick (and anyone's whose time ran out): the strongest-looking move, with some luck.
+ *  The bot tamer (canSwitch) also swaps a critter the other one's type beats for one it doesn't, about half the time. */
+function botPick(teams, act, side, canSwitch) {
   const meC = teams[side][act[side]], foe = teams[1 - side][act[1 - side]], sp = species(meC.s), ft = species(foe.s).type;
+  const beaten = (c) => typeMult(ft, species(c.s).type) > 1, swap = teams[side].findIndex((c, i) => i !== act[side] && c.hp > 0 && !beaten(c));
+  if (canSwitch && beaten(meC) && swap >= 0 && Math.random() < 0.5) return "s" + swap;
   if (meC.hp < meC.max * 0.3 && sp.moves.includes("rest") && Math.random() < 0.6) return sp.moves.indexOf("rest");
   let best = 0, bv = -1;
   sp.moves.forEach((k, i) => {
@@ -479,7 +485,7 @@ function botPick(teams, act, side) {
 function resolveTurn(b) {
   const key = b.id + ":" + b.turn, picks = (host.picks.get(key) || [null, null]).slice();
   const teams = b.teams.map((t) => t.map((c) => ({ ...c }))), act = b.act.slice(), log = [];
-  for (const s of [0, 1]) if (picks[s] === null || b.sides[s].i === "bot") picks[s] = botPick(teams, act, s);
+  for (const s of [0, 1]) if (picks[s] === null || b.sides[s].i === "bot") picks[s] = botPick(teams, act, s, b.sides[s].i === "bot");
   for (const s of [0, 1]) if (typeof picks[s] === "string") {
     const i = +picks[s].slice(1);
     if (teams[s][i] && teams[s][i].hp > 0 && i !== act[s]) { act[s] = i; log.push({ k: "send", s, i }); }
@@ -538,7 +544,7 @@ function publishPos(force) {
   net.me.set("p", JSON.stringify({ x: Math.round(me.x), y: Math.round(me.y), f: me.f, m: me.m }));
 }
 function myTick(dt, now) {
-  if (inBattle(net.sessionId) || catching) { me.m = 0; me.goal = null; publishPos(); return; }
+  if (inBattle(net.sessionId) || catching || !$("over").hidden) { me.m = 0; me.goal = null; publishPos(); return; } // busy, or reading the battle result
   let ix = input.x, iy = input.y;
   if (ATTRACT) autopilot();
   if (!ix && !iy && me.goal) { const dx = me.goal.x - me.x, dy = me.goal.y - me.y, d = Math.hypot(dx, dy); if (d < 4) me.goal = null; else { ix = dx / d; iy = dy / d; } }
@@ -551,8 +557,8 @@ function myTick(dt, now) {
     if (Math.abs(ix) > 0.1) me.f = ix > 0 ? 1 : -1;
     if (me.goal && Math.hypot(me.x - bx, me.y - by) < CONFIG.speed * dt * 0.2) me.goal = null; // walked into a wall
   }
-  for (const w of wildList()) { // bump into a free wild critter to try to catch it
-    if (w.h || Math.hypot(w.x - me.x, w.y - me.y) > 24 || now < (me.bump.get(w.i) || 0)) continue;
+  for (const w of wildList()) { // walk into a free wild critter to try to catch it (one that wanders into you while you stand still doesn't count)
+    if (!me.m || w.h || Math.hypot(w.x - me.x, w.y - me.y) > 24 || now < (me.bump.get(w.i) || 0)) continue;
     me.bump.set(w.i, now + 1500);
     if (isHost()) applyGrab(net.sessionId, { i: w.i }); else net.send("grab", { i: w.i });
     break;
@@ -573,6 +579,7 @@ function catchTick(now) {
     return;
   }
   const c = catching;
+  if (c.phase === "aim" && !wildList().some((x) => x.i === c.w.i && x.h === net.sessionId)) { c.phase = "fled"; c.at = now; c.text = `${species(c.w.s).name} ran away!`; sound(160, 0.3); } // took too long: the host let it go
   if (c.phase === "aim" && ATTRACT && now - c.at > 500 && Math.abs(ringAt(c, now) - 0.3) < 0.03) throwOrb(now);
   if (c.phase === "throw" && now - c.at > 450) { c.phase = "shake"; c.at = now; sound(300, 0.08); }
   if (c.phase === "shake" && now - c.at > c.shakes * CONFIG.shakeMs + 200) {
@@ -737,7 +744,7 @@ function drawHpBox(b, s, near) {
   ctx.fillStyle = "#0008"; rr(x + 12, y + 32, bw, 10, 5); ctx.fill();
   ctx.fillStyle = f > 0.5 ? "#4ade80" : f > 0.2 ? "#facc15" : "#f87171"; rr(x + 12, y + 32, Math.max(0, bw * f), 10, 5); ctx.fill();
   ctx.fillStyle = "#ffffffcc"; ctx.font = "700 10px system-ui, sans-serif"; ctx.textAlign = "left";
-  ctx.fillText(`${b.sides[s].n} · ${b.teams[s].filter((x) => x.hp > 0).length}/${b.teams[s].length} left${near ? ` · ${Math.max(0, Math.round(bv.shown[s]))}/${c.max} HP` : ""}`, x + 12, y + 53);
+  ctx.fillText(`${b.sides[s].n} · ${b.teams[s].filter((x, i) => (bv.hp[s][i] ?? x.hp) > 0).length}/${b.teams[s].length} left${near ? ` · ${Math.max(0, Math.round(bv.shown[s]))}/${c.max} HP` : ""}`, x + 12, y + 53);
 }
 /** The battle is over and the last line has played: give my team its XP (once) and show the result. */
 function battleOver(b) {
@@ -758,11 +765,11 @@ function battleOver(b) {
   $("overSub").textContent = `+${gain} XP for your team. ${ups.join(" ")}`;
   $("over").hidden = false; sound(won ? 660 : 180, 0.4, 0.3);
   const list = $("board");
-  if (!board) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
-  list.innerHTML = "<li>Loading…</li>";
+  if (!board) { list.innerHTML = "<li class=\"note\">Leaderboards need a connection.</li>"; return; }
+  list.innerHTML = "<li class=\"note\">Loading…</li>";
   (won ? board.submit(1, "inc").catch(() => null) : Promise.resolve()).then(() => board.top(10)).then(({ entries }) => {
-    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score}</span></li>`).join("") : "<li>No wins yet. Be the first.</li>";
-  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score}</span></li>`).join("") : "<li class=\"note\">No wins yet. Be the first.</li>";
+  }).catch(() => { list.innerHTML = "<li class=\"note\">Couldn't load the leaderboard.</li>"; });
 }
 $("back").onclick = () => { $("over").hidden = true; };
 
@@ -949,11 +956,12 @@ addEventListener("keydown", (e) => {
   const k = e.key.toLowerCase(); keys.add(k);
   if (k === " " || k.startsWith("arrow")) e.preventDefault();
   if (k === " " && catching) throwOrb(performance.now());
-  const b = battle(), i = "123".indexOf(k);
-  if (i >= 0 && busyBattle(b) && mySideOf(b) >= 0) pickMove(i);
+  else if ((k === " " || k === "enter" || k === "escape") && !$("over").hidden) $("over").hidden = true;
+  const b = battle(), btn = $("moves").querySelectorAll("button")["1234".indexOf(e.code.startsWith("Digit") ? e.code.slice(5) : k)]; // 1–4: the buttons in the battle panel, in order (moves, then Switch)
+  if (btn && !btn.disabled && busyBattle(b) && mySideOf(b) >= 0) btn.click();
 });
 addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
-addEventListener("blur", () => keys.clear());
+addEventListener("blur", () => { keys.clear(); stick.id = null; input.x = input.y = 0; }); // nothing stays held after the tab loses focus
 // Pointer: during catching any tap throws. On the field, a tap walks there and a drag is a thumb stick.
 cv.addEventListener("pointerdown", (e) => {
   e.preventDefault();
@@ -977,6 +985,7 @@ for (const ev of ["pointerup", "pointercancel"]) cv.addEventListener(ev, (e) => 
   stick.id = null; input.x = input.y = 0;
 });
 function drawStick() { if (stick.id === null || !stick.moved) return; ctx.strokeStyle = "#ffffff66"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(stick.x, stick.y, 44, 0, Math.PI * 2); ctx.stroke(); ctx.fillStyle = "#ffffff55"; ctx.beginPath(); ctx.arc(stick.x + input.x * 44, stick.y + input.y * 44, 18, 0, Math.PI * 2); ctx.fill(); }
+cv.addEventListener("contextmenu", (e) => e.preventDefault());
 document.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
 
 // ── MAIN LOOP ───────────────────────────────────────────────────────────────────────

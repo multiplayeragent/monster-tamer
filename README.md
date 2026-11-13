@@ -8,7 +8,7 @@ Catch critters in the grass. Battle another tamer. A multiplayer starter game fr
 
 Walk into a wild critter in the tall grass and time your throw to catch it. Then battle another tamer turn by turn: pick a move, mind the types (Ember beats Leaf, Leaf beats Tide, Tide beats Ember), and level up your team.
 
-**Controls:** WASD or arrows to walk (or tap to walk, drag for a thumb stick), tap or Space to throw, tap a move or press 1–3 in battle.
+**Controls:** WASD or arrows to walk (or tap to walk, drag for a thumb stick), tap or Space to throw, tap a move or press 1–4 in battle.
 
 ## Make it yours in the Game Builder
 
